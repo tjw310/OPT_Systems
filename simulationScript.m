@@ -20,3 +20,18 @@ system.simulateProjections(objective,object,coneSystem);
 
 %system.reconPS(object.getY,object.getY)
 
+system = ConeBeamSystem();
+objective = Objective(0.4,20);
+object = PointObject(0.1,-0.2,0);
+
+system.setWidth(1048);
+system.setHeight(2110);
+system.setAxisDirection('vert');
+system.setRotationDirection('anti');
+system.setNAngles(360);
+system.setNProj(128);
+system.setR(10000);
+system.setBinFactor(2);
+
+
+

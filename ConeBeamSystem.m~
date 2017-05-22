@@ -56,9 +56,9 @@ classdef ConeBeamSystem < OPTSystem
                 obj.calculateApertureDisplacement(objective);
             end
             obj.apertureDisplacement
-            obj.clearProjections;
-            obj.setAllProjections(0);
-            theta = obj.theta;
+            simpleConeRecon.clearProjections;
+            simpleConeRecon.setAllProjections(0);
+            theta = simpleConeRecon.theta;
             
             for i=1:length(theta)
                 t = theta(i);

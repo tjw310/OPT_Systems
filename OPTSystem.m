@@ -385,33 +385,29 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             end
             reconstruct(obj,mnidx,mxidx,displayBoolean);
         end
-        
         function normaliseReconstructions(obj)
             if exist(fullfile(obj.outputPath,'MaxMinValues.txt'))~=2
                 error('Please reconstruct projections first');
             else
                 maxMinValues = dlmread(fullfile(obj.outputPath,'MaxMinValues.txt'));
                 minimumValue = min(maxMinValues(:,1));
-                maximumValue = min(maxMinValues(:,2));
+                maximumValue = max(maxMinValues(:,2));
                 im_dir = dir(fullfile(obj.outputPath,'*.tif'));
                 if isempty(im_dir)
                     im_dir = dir(fullfile(obj.outputPath,'*.tiff'));
                 end
                 for i=1:length(im_dir)
                     im = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(i).name))))));
-                    im_name = strsplit(im_dir(i).name,'.')
+                    im_name = strsplit(im_dir(i).name,'.');
                     index = str2double(im_name{1});
                     im = im./65535*((maxMinValues(index,2)-maxMinValues(index,1))+maxMinValues(index,1));
                     im = uint16((im-minimumValue)./(maximumValue-minimumValue).*65535);
-                    imagesc(im); axis equal tight; colorbar; drawnow; pause(.3);
+                    imagesc(im); axis equal tight; caxis([0,2^16-1]); drawnow; pause(.3);
                     imwrite(im,strcat(fullfile(obj.getOutputPath,num2str(index,'%05d')),'.tiff'));
-                    disp(sprintf('Normalisation Completion Percentage: %.1f%%',i/length(im_dir)));
+                    disp(sprintf('Normalisation Completion Percentage: %.1f%%',i/length(im_dir)*100));
                 end 
             end
         end
-                
-            
-            
         %@param Objective objective, objective class
         %@param PointObject pointObject, point object class
         %@param PointObject[] pointObject, array of pointObjects

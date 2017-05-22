@@ -1,4 +1,4 @@
-classdef OPTSystem < handle
+classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
     %Class defining an optical projection system and its properties
     
     properties (Access = private)
@@ -11,7 +11,8 @@ classdef OPTSystem < handle
         rotationDirection  %defines rotation direction, either 'clock' or 'anti'
         axisDirection  %define rotation axis direction, either 'horiz' or 'vert'
         pxSz = 6.5e-3 %size of sensor pixels in mm (6.5e-3 by default)
-        lambda %wavelength in mm
+        lambda = 500e-6; %wavelength in mm
+        apertureRadius %radius of aperture stop in mm
         
         % Large Data
         projections %raw projection information
@@ -23,6 +24,7 @@ classdef OPTSystem < handle
         useGPU = 0; %boolean: true -> use GPU
         interptype = 'linear'; %interpolateion type, set linear default
         path %path of raw projections
+        outputPath %path of reconstructions
         binFactor = 1; %value of bin factor
         unbinnedWidth %number of pixels in direction perpendicular to the rotation axis (not binned)
         unbinnedHeight %number of pixels in direction parallel to the rotation axis (not binned)
@@ -33,8 +35,7 @@ classdef OPTSystem < handle
         %constructor
         function obj = OPTSystem()
             obj.path = uigetdir();
-        end
-                
+        end           
         function out = getPath(obj)
             out = obj.path;
         end        
@@ -75,6 +76,31 @@ classdef OPTSystem < handle
         function out = getMotorAxisDisplacement(obj)
             out = obj.motorAxisDisplacement/obj.binFactor;
         end
+        function out = getApertureRadius(obj)
+            out = obj.apertureRadius;
+        end
+        function out = getLambda(obj)
+            out = obj.lambda;
+        end
+        function out = getBinFactor(obj)
+            out = obj.binFactor;
+        end
+        function out = getFilter(obj)
+            out = obj.filter;
+        end
+        function out = getAllFilteredProj(obj)
+            out = obj.filteredProj;
+        end
+        function out = getInterptype(obj)
+            out = obj.interptype;
+        end
+        function out = getOutputPath(obj)
+            out = obj.outputPath;
+        end
+        % @param double index, projection number
+        function out = getFilteredProj(obj,index)
+            out = obj.filteredProj(:,:,index);
+        end
         function resetDimensions(obj)
             switch obj.axisDirection
                 case 'horiz'
@@ -83,6 +109,13 @@ classdef OPTSystem < handle
                 case 'vert'
                     obj.width = size(obj.projections,2);
                     obj.height = size(obj.projections,1);
+            end
+        end
+        function setPath(obj,varargin)
+            if nargin==2
+                obj.path = varargin{1};
+            else
+                obj.path = uigetdir;
             end
         end
         %param double R, effective source-detector distance
@@ -148,6 +181,21 @@ classdef OPTSystem < handle
         function setBinFactor(obj,binFactor)
             obj.binFactor = binFactor;
         end
+        %@param double apSz, size of aperture in mm
+        function setApertureRadius(obj,apSz)
+            obj.apertureRadius = apSz;
+        end
+        %@param double lambda, wavelength imaging in mm
+        function setLambda(obj,lambda)
+            obj.lambda = lambda;
+        end
+        
+    end
+    
+    %% abstract methods
+    methods (Abstract)
+        out = getPSFimage(obj);
+        reconstruct(obj);
     end
     
     %% projection load / manipulation
@@ -320,31 +368,133 @@ classdef OPTSystem < handle
                 imagesc(obj.filteredProj(:,:,i)); drawnow;
             end
         end 
-        %reconstruct using iradon
         % @param double mnidx, minimum slice number index
         % @param double mxidx, maximum slice number index to reconstruct
-        % @param boolean showBoolean, true to display slices
-        function reconstructProjections(obj,mnidx,mxidx,showBoolean)
-            reconstructionFolderName = 'iradon_Reconstructions';
-            if exist(reconstructionFolderNamge,obj.path)~=7
+        % @param boolean displayBoolean, true to display slices
+        function reconstructProjections(obj,mnidx,mxidx,displayBoolean)
+            reconstructionFolderName = 'Reconstructions';
+            if ~isdir(fullfile(obj.path,reconstructionFolderName))
                 mkdir(obj.path,reconstructionFolderName);
+                dlmwrite(fullfile(fullfile(obj.path,reconstructionFolderName),'MaxMinValues.txt'),zeros(obj.getHeight,2),';');
+            elseif exist(fullfile(fullfile(obj.path,reconstructionFolderName),'MaxMinValues.txt'))~=2
+                dlmwrite(fullfile(fullfile(obj.path,reconstructionFolderName),'MaxMinValues.txt'),zeros(obj.getHeight,2),';');
             end
-            outputPath = fullfile(obj.path,name);
-            if showBoolean==1
+            obj.outputPath = fullfile(obj.path,reconstructionFolderName);
+            if displayBoolean==1
                 figure;
             end
-            for index=mnidx:mxidx
-                if obj.useGPU==1
-                    sinogram = gpuArray(obj.getSinogram(index));
-                    reconstrucedSlice = gather(iradon(sinogram,obj.theta,obj.filter,1,size(sinogram,1)));
+            reconstruct(obj,mnidx,mxidx,displayBoolean);
+        end
+        
+        function normaliseReconstructions(obj)
+            if exist(fullfile(obj.outputPath,'MaxMinValues.txt'))~=2
+                error('Please reconstruct projections first');
+            else
+                maxMinValues = dlmread(fullfile(obj.outputPath,'MaxMinValues.txt'));
+                minimumValue = min(maxMinValues(:,1));
+                maximumValue = min(maxMinValues(:,2));
+                im_dir = dir(fullfile(obj.outputPath,'*.tif'));
+                if isempty(im_dir)
+                    im_dir = dir(fullfile(obj.outputPath,'*.tiff'));
+                end
+                for i=1:length(im_dir)
+                    im = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(i).name))))));
+                    im_name = strsplit(im_dir(i).name,'.')
+                    index = str2double(im_name{1});
+                    im = im./65535*((maxMinValues(index,2)-maxMinValues(index,1))+maxMinValues(index,1));
+                    im = uint16((im-minimumValue)./(maximumValue-minimumValue).*65535);
+                    imagesc(im); axis equal tight; colorbar; drawnow; pause(.3);
+                    imwrite(im,strcat(fullfile(obj.getOutputPath,num2str(index,'%05d')),'.tiff'));
+                    disp(sprintf('Normalisation Completion Percentage: %.1f%%',i/length(im_dir)));
+                end 
+            end
+        end
+                
+            
+            
+        %@param Objective objective, objective class
+        %@param PointObject pointObject, point object class
+        %@param PointObject[] pointObject, array of pointObjects
+        %@param boolean showBoolean, true if want to display projection
+        function simulateProjections(obj,objective,pointObject,showBoolean)
+            if isempty(obj.apertureRadius)
+                obj.apertureRadius = 2*objective.getRadiusPP;
+            end
+            obj.clearProjections;
+            obj.setAllProjections(0);
+            theta = obj.theta;
+            xRange = obj.xPixels.*obj.getPixelSize;
+            yRange = obj.yPixels.*obj.getPixelSize;
+            dx = 4*objective.getRadiusPP/obj.getWidth;
+            uMax = 1/(2*dx);
+            dy = 4*objective.getRadiusPP/obj.getWidth;
+            vMax = 1/(2*dy);
+                
+            if obj.useGPU==1
+                [xApPlane,yApPlane] = gpuArray(meshgrid(obj.xPixels./obj.getWidth*4*objective.getRadiusPP,obj.yPixels./obj.getWidth*4*objective.getRadiusPP));
+                rApPlane = sqrt(xApPlane.^2+yApPlane.^2);
+                P = gpuArray(ones(size(xApPlane))); P(rApPlane>obj.apertureRadius)=0; P = P./sum(P(:)); %Aperture function (circle)
+                [imageX,imageY] = gpuArray(meshgrid(xRange,yRange));
+                [psfscX,psfscY] = gpuArray(meshgrid(obj.xPixels./obj.getWidth*2*uMax,obj.yPixels./obj.getHeight*2*vMax));
+            else
+                [xApPlane,yApPlane] = (meshgrid(obj.xPixels./obj.getWidth*2*objective.getRadiusPP,obj.yPixels./obj.getWidth*2*objective.getRadiusPP));
+                rApPlane = sqrt(xApPlane.^2+yApPlane.^2);
+                P = (ones(size(xApPlane))); P(rApPlane>obj.apertureRadius)=0; P = P./sum(P(:)); %Aperture function (circle)
+                [imageX,imageY] = (meshgrid(xRange,yRange));
+                [psfscX,psfscY] = (meshgrid(obj.xPixels./obj.getWidth*2*uMax,obj.yPixels./obj.getHeight*2*vMax));
+            end
+            
+            for i=1:length(theta)
+                t = theta(i);
+                I = zeros(obj.getHeight,obj.getWidth);
+                if length(pointObject)==1
+                    objectX = pointObject.getRotatedX(t); %object space x loc after rotation
+                    objectZ = pointObject.getRotatedZ(t); %object space z loc after rotation
+                    objectY = pointObject.getY;
+                    I = obj.getPSFimage(objectX,objectY,objectZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P);
                 else
-                    sinogram = obj.getSinogram(index);
-                    reconstrucedSlice = iradon(sinogram,obj.theta,obj.filter,1,size(sinogram,1));
+                    for currentPointObject = pointObject
+                        objectX = currentPointObject.getRotatedX(t); %object space x loc after rotation
+                        objectZ = currentPointObject.getRotatedZ(t); %object space z loc after rotation
+                        objectY = currentPointObject.getY;
+                        psf = obj.getPSFimage(objectX,objectY,objectZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P);
+                        I = I + psf;
+                    end
                 end
-                imwrite(reconstrucedSlice,strcat(fullfile(outputPath,num2str(index,'%05d')),'.tiff'));
+                obj.setProjection(I,i);
                 if showBoolean==1
-                    imagesc(reconstrucedSlice); drawnow;
+                    imagesc(I); axis equal tight; drawnow;
                 end
+                if rem(i,5)==0
+                    disp(sprintf('Simulation Completion Percentage = %.0f%%',i/length(theta)*100));
+                end
+            end     
+        end
+        %@param double index, index of sinogram
+        %@param varargin
+        %           - double[] aorVector, length obj.nProj of a variable
+        %           motorAxisDisplacement, position of rotation axis
+        %           - double aorVector, constant motorAxisDisplacement
+        %           - [], uses existing obj.motorAxisDisplacement (default 0)
+        function out = getSinogram(obj,index,varargin)
+            if nargin > 2
+                if length(varargin{1})==obj.nProj
+                     aorVector = varargin{1};
+                elseif length(varargin{1})==1 && isnumeric(varargin{1})
+                    aorVector = varargin{1};
+                    obj.setMotorAxisDisplacement(varargin{1});
+                else
+                    error('Incompatiable sinogram shift amount, enter constant or vector of length no.Projections');
+                end
+            else
+                aorVector = obj.motorAxisDisplacement;
+            end
+            
+            switch obj.axisDirection
+                case 'horiz'
+                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(:,index,:)),aorVector);
+                case 'vert'
+                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(index,:,:)),aorVector);
             end
         end
     end
@@ -393,34 +543,6 @@ classdef OPTSystem < handle
                 filt = gpuArray(filt);
             end
         end
-        
-        %@param double index, index of sinogram
-        %@param varargin
-        %           - double[] aorVector, length obj.nProj of a variable
-        %           motorAxisDisplacement, position of rotation axis
-        %           - double aorVector, constant motorAxisDisplacement
-        %           - [], uses existing obj.motorAxisDisplacement (default 0)
-        function out = getSinogram(obj,index,varargin)
-            switch varargin
-                case length(varargin{1})==obj.nProj
-                     aorVector = varargin{1};
-                case []
-                    aorVector = obj.motorAxisDisplacement;
-                case length(varargin{1})==1 && isnumeric(varargin{1})
-                    aorVector = varargin{1};
-                    obj.setMotorAxisDisplacement(varargin{1});
-                otherwise
-                    error('Incompatiable sinogram shift amount, enter constant or vector of length no.Projections');
-            end
-            
-            switch obj.axisDirection
-                case 'horiz'
-                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(index,:,:)),aorVector);
-                case 'vert'
-                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(:,index,:)),aorVector);
-            end
-        end
-
     end
     
     methods (Static)
@@ -439,19 +561,18 @@ classdef OPTSystem < handle
         %param double aorVector, constant shift for all projections
         function out = shiftSinogram(sinogram,aorVector)
             out = zeros(size(sinogram));
-              switch aorVector
-                  case length(aorVector)==1
-                      y = 1:size(sinogram,1)-aorVector;
-                      for i=1:size(sinogram,2)
-                          out(1:size(sinogram,1),i) = interp1(sinogram(:,i),y);
-                      end
-                  case length(aorVector)==size(sinogram,2)
-                      for i=1:size(sinogram,2)
-                          y = 1:size(sinogram,1)-aorVector(i);
-                          out(1:size(sinogram,1),i) = interp1(sinogram(:,i),y);
-                      end
-                  otherwise
-                      error('Invalid AoR vector amount');
+              if length(aorVector)==1
+                  y = 1:size(sinogram,1)-aorVector;
+                  for i=1:size(sinogram,2)
+                      out(1:size(sinogram,1),i) = interp1(sinogram(:,i),y);
+                  end
+              elseif length(aorVector)==size(sinogram,2)
+                  for i=1:size(sinogram,2)
+                      y = 1:size(sinogram,1)-aorVector(i);
+                      out(1:size(sinogram,1),i) = interp1(sinogram(:,i),y);
+                  end
+              else
+                  error('Invalid AoR vector amount');
               end
         end
     end

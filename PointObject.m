@@ -25,15 +25,43 @@ classdef PointObject
         function out = getZ(obj)
             out = obj.z;
         end
-        
-        %@param SimpleConeRecon simpleConeRecon, class with system
-        %information and recon information
-        function out = getYinPixels(obj,simpleConeRecon,objective)
-            out = obj.y/simpleConeRecon.getPixelSize*objective.getMagnification+simpleConeRecon.getHeight/2;
+    end
+    
+    %% rotation methods
+    methods
+        % @param double projectionAngle, projection angle (+ anti-clock rotation, -
+        % clockwise roation)
+        % @param double varargin, centreOfRotationX if displaced rotation
+        % axis
+        function out = getRotatedX(obj,projectionAngle,varargin)
+            centreOfRotationX = 0;
+            if nargin > 2
+                switch varargin
+                    case isnumeric(varargin{1})
+                        centreOfRotationX = varargin{1};
+                    otherwise
+                        error('Enter x centre of rotation locations or leave blank');
+                end
+            end
+            out = (obj.x-centreOfRotationX)*cos(projectionAngle)-obj.z*sin(projectionAngle)+centreOfRotationX;
         end
-        function out = getXinPixels(obj,simpleConeRecon,objective)
-            out = obj.x/simpleConeRecon.getPixelSize*objective.getMagnification+simpleConeRecon.Width/2;
-        end 
+        % @param double projectionAngle, projection angle (+ anti-clock rotation, -
+        % clockwise roation)
+        % @param double varargin, centreOfRotationZ if displaced rotation
+        % axis
+        function out = getRotatedZ(obj,projectionAngle,varargin)
+            centreOfRotationZ = 0;
+            if nargin > 2
+                switch varargin
+                    case isnumeric(varargin{1})
+                        centreOfRotationZ = varargin{1};
+                    otherwise
+                        error('Enter x centre of rotation locations or leave blank');
+                end
+            end
+            out = (obj.z-centreOfRotationZ)*cos(projectionAngle)+obj.x*sin(projectionAngle)+centreOfRotationZ;
+        end
+        
     end
     
     %% trace methods

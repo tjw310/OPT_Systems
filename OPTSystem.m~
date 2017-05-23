@@ -471,12 +471,14 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 t = theta(i);
                 I = zeros(obj.getHeight,obj.getWidth);
                 if length(pointObject)==1
-                    [objectX,objectZ] = pointObject.getRotatedXZ(t,[xAoRDisplacement,zAoRDisplacement]); %object space [x,z] in mm loc after rotation
+                    objectX = pointObject.getRotatedX(t,xAoRDisplacement); %object space x loc after rotation
+                    objectZ = pointObject.getRotatedZ(t,zAoRDisplacement); %object space z loc after rotation
                     objectY = pointObject.getY;
                     I = obj.getPSFimage(objectX,objectY,objectZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
                 else
                     for currentPointObject = pointObject
-                        [objectX,objectZ] = currentPointObject.getRotatedXZ(t,[xAoRDisplacement,zAoRDisplacement]); %object space [x,z] in mm loc after rotation
+                        objectX = currentPointObject.getRotatedX(t,xAoRDisplacement); %object space x loc after rotation
+                        objectZ = currentPointObject.getRotatedZ(t,zAoRDisplacement); %object space z loc after rotation
                         objectY = currentPointObject.getY;
                         psf = obj.getPSFimage(objectX,objectY,objectZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
                         I = I + psf;
@@ -557,9 +559,9 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 case 'vert'
                     [ramp_kernel] = repmat(OPTSystem.ramp_flat(obj.getWidth).',obj.getHeight,1);
                      %ramp_kernel = padarray(ramp_kernel,[0,(filt_len-obj.getWidth)/2],'both');
-                     ramp_kernel = padarray(ramp_kernel,[0,filt_len/2-obj.getWidth/2+obj.getMotorAxisXDisplacement],'pre');
-                     ramp_kernel = padarray(ramp_kernel,[0,filt_len/2-obj.getWidth/2-obj.getMotorAxisXDisplacement],'post');
-                     figure; imagesc(ramp_kernel); figure;
+                     ramp_kernel = padarray(ramp_kernel,[0,filt_len/2-obj.getWidth/2-obj.getMotorAxisXDisplacement],'pre');
+                     ramp_kernel = padarray(ramp_kernel,[0,filt_len/2-obj.getWidth/2+obj.getMotorAxisXDisplacement],'post');
+                     figure
                      filt = abs(fft(ramp_kernel,[],2));
             end
                     

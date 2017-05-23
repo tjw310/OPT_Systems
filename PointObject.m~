@@ -38,9 +38,8 @@ classdef PointObject
             centreOfRotationZ = 0;
             if nargin == 3
                 if isnumeric(varargin{1})
-                     centre = varargin{1};
-                     centreOfRotationX = centre(1);
-                     centreOfRotationZ = centre(2);
+                     centre varargin{1}
+                    [centreOfRotationX,centreOfRotationZ] = varargin{1};
                 else
                     error('Enter x centre of rotation locations or leave blank');
                 end

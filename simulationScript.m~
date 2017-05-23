@@ -34,44 +34,26 @@ system.setAxisDirection('vert');
 system.setRotationDirection('clock');
 system.setNAngles(360);
 system.setNProj(400);
-system.setBinFactor(4);
+system.setBinFactor(1);
 system.setApertureRadius(objective.getRadiusPP/apertureReductionFactor);
-system.setOpticCentre([1000,400]);
 system.setR(3000);
-system.setMotorAxisXDisplacement(0);
+system.setOpticCentre = [0,
 
 %system2 = Standard4fSystem();
-system2.setBinFactor(system.getBinFactor);
 system2.setLambda(system.getLambda);
-system2.setWidth(system.getWidth*system2.getBinFactor);
-system2.setHeight(system.getHeight*system2.getBinFactor);
+system2.setWidth(system.getWidth);
+system2.setHeight(system.getHeight);
 system2.setAxisDirection(system.getAxisDirection);
 system2.setRotationDirection(system.getRotationDirection);
 system2.setNAngles(system.getNAngles);
 system2.setNProj(system.getNProj);
+system2.setBinFactor(system.getBinFactor);
 system2.setApertureRadius(system.getApertureRadius);
-system2.setOpticCentre(system.getOpticCentre*system2.getBinFactor);
-system2.setMotorAxisXDisplacement(system.getMotorAxisXDisplacement*system2.getBinFactor);
-
-%system3 = ConeBeamSystem();
-system3.setR(3000);
-system3.setOpticCentre([0,0]);
-system3.setMotorAxisXDisplacement(100);
-system3.setBinFactor(system.getBinFactor);
-system3.setLambda(system.getLambda);
-system3.setWidth(system.getWidth*system2.getBinFactor);
-system3.setHeight(system.getHeight*system2.getBinFactor);
-system3.setAxisDirection(system.getAxisDirection);
-system3.setRotationDirection(system.getRotationDirection);
-system3.setNAngles(system.getNAngles);
-system3.setNProj(system.getNProj);
-system3.setApertureRadius(system.getApertureRadius);
 %system.simulateProjections(objective,object,1);
 %%
 %round(object(1).getYPixelPosition(system,objective))
 %system.reconstructProjections(round(object(1).getYPixelPosition(system,objective)),round(object(1).getYPixelPosition(system,objective)),1);
-system.simulateProjections(objective,object,0);
-system2.simulateProjections(objective,object,0);
-system3.simulateProjections(objective,object,0);
+system.simulateProjections(objective,object,1);
+system2.simulateProjections(objective,object,1);
 
 

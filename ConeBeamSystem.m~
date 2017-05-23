@@ -13,29 +13,36 @@ classdef ConeBeamSystem < OPTSystem
     end
     
     %% get/set methods
-    methods      
+    methods
+        
         function out = getApertureDisplacement(obj)
             out = obj.apertureDisplacement;
         end
+        
         function out = getR(obj)
             out = obj.R/obj.getBinFactor;
         end
+        
         %@param double R, effective source-detector distance in pixels
         function setR(obj,R)
             obj.R = R;
         end
+        
         %@param double apDisp, axial aperture displacement away from pupil
         %plane in mm
         function setApertureDisplacement(obj,apDisp)
             obj.apertureDisplacement = apDisp;
-        end 
+        end
+        
         %@param Objective objective, objective class provides focal length
         %and magnfication information
         function calculateApertureDisplacement(obj,objective)
            obj.setApertureDisplacement(objective.getF*objective.getF/(obj.getR.*obj.getPixelSize/objective.getMagnification));
-        end         
+        end
+            
     end
-
+    
+    
     methods  
         % @param double x,y,z , location of point object
         % @param Objective objective, objective class object
@@ -96,13 +103,13 @@ classdef ConeBeamSystem < OPTSystem
                     end
 
                    u = D.*(xxS*cos(t(i))+zz*sin(t(i))-op(1)-motorOffset)...
-                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)+motorOffset;
+                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset;
 
                    U = (xxS*sin(t(i))-zz*cos(t(i))+D)./D;
                    v = (1./U.*(index-obj.getHeight/2-op(2)))+op(2);                       
 
-                    u2 = u-xxS(1,1)+1;
-                    v2 = v-zz(1,1)+1;
+                    u2 = u-xxS(1,1);
+                    v2 = v-zz(1,1);
 
                     switch obj.getAxisDirection
                         case 'horiz'
@@ -119,7 +126,7 @@ classdef ConeBeamSystem < OPTSystem
                     end
                 end
                 slice(isnan(slice)) = 0;
-                maxMinValues(index,1:3) = [min(slice(:)),max(slice(:)),index];
+                maxMinValues(index,:) = [min(slice(:));max(slice(:))];
                 writeSlice = gather(uint16((slice-min(slice(:)))./(max(slice(:))-min(slice(:))).*65535));
                 imwrite(writeSlice,strcat(fullfile(obj.getOutputPath,num2str(index,'%05d')),'.tiff'));
                 if displayBoolean==1

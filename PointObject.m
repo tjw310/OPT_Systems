@@ -27,45 +27,68 @@ classdef PointObject
         end
     end
     
-    %% rotation methods
+    %% private methods
+    methods (Access = private)
+        %constructs vector from obj.x, obj.z coordinates
+        function out = vectorXZ(obj)
+            out = [obj.x;obj.z];
+        end
+    end
+    
+    %% static methods
+    methods (Static)
+        % calculates rotation matrix (2D) by angle theta
+        %@ param double theta, angle of rotation in radians
+        function R = getRMatrix(theta)
+            R = [cos(theta),-sin(theta);sin(theta),cos(theta)];
+        end
+        
+        % returns inverse of 2D matrix
+        %@ param double[][] matrix, 2x2 array of doubles
+        function out = inverse(matrix)
+            det = matrix(2,2)*matrix(1,1)-matrix(1,2)*matrix(2,1);
+            out = 1/det.*[matrix(2,2),-matrix(1,2);-matrix(2,1),matrix(1,1)];
+        end
+        
+        %@param double theta, angle to rotate
+        %@param double[] inputVector, vector to translate
+        function outputVector = rotate(theta,inputVector)
+            R = PointObject.getRMatrix(theta);
+            outputVector = R*inputVector;
+        end
+        
+        %@param double d0,d1 translation amounts in first and second
+        %dimensions
+        %@param double[] inputVector, vector to translate
+        function outputVector = translate(d0,d1,inputVector)
+            outputVector = inputVector-[d0;d1];
+        end
+            
+    end
+    %% point manipulation methods
     methods
         % @param double projectionAngle, projection angle (+ anti-clock rotation, -
         % clockwise roation)
         % @param double[] varargin, [centreOfRotationX,centreOfRotationZ] if displaced rotation
         % axis in mm
         function [xRot,zRot] = getRotatedXZ(obj,projectionAngle,varargin)
-            centreOfRotationX = 0;
-            centreOfRotationZ = 0;
             if nargin == 3
                 if isnumeric(varargin{1})
                      centre = varargin{1};
                      centreOfRotationX = centre(1);
                      centreOfRotationZ = centre(2);
+                     rotCoords = PointObject.translate(-centreOfRotationX,-centreOfRotationZ)*PointObject.rotate(projectionAngle)*PointObject.translate(centreOfRotationX,centreOfRotationZ)*obj.vectorXZ;
+                     xRot = rotCoords(1);
+                     zRot = rotCoords(2);
                 else
                     error('Enter x centre of rotation locations or leave blank');
                 end
+            else
+                rotCoords = PointObject.rotate(projectionAngle)*obj.vectorXZ;
+                 xRot = rotCoords(1);
+                 zRot = rotCoords(2);
             end
-            xRot = (obj.x-centreOfRotationX)*cos(projectionAngle)-(obj.z-centreOfRotationZ)*sin(projectionAngle)+centreOfRotationX;
-            zRot = (obj.x-centreOfRotationX)*sin(projectionAngle)+(obj.z-centreOfRotationZ)*cos(projectionAngle)+centreOfRotationZ;
         end      
-    end
-    
-    %% trace methods
-    methods
-        function out = getTrace(obj,simpleConeRecon,objective)
-            theta = simpleConeRecon.theta;
-            xRot = (obj.x*cos(theta)-obj.z*sin(theta))/simpleConeRecon.getPixelSize*objective.getMagnification;
-            zRot = (obj.z*cos(theta)+obj.x*sin(theta))/simpleConeRecon.getPixelSize*objective.getMagnification;
-            y = obj.y/simpleConeRecon.getPixelSize*objective.getMagnification;
-            R = simpleConeRecon.getR;
-            op = simpleConeRecon.getOpticCentre;
-            
-            epsilon = (xRot-op(1))./(1+zRot./R)+op(1)+simpleConeRecon.getWidth/2;
-            sigma = (y-op(2))./(1+zRot./R)+op(2)+simpleConeRecon.getHeight/2;
-            out(1,1:length(theta)) = epsilon;
-            out(2,1:length(theta)) = sigma;
-        end
-            
     end
 end
 

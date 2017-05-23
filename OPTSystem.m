@@ -1,4 +1,4 @@
-classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
+classdef (Abstract) OPTSystem < handle 
     %Class defining an optical projection system and its properties
     
     properties (Access = private)
@@ -22,7 +22,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         
         % Computational Parameteres
         filter = 'ram-lak'; %filter used in reconstruction (Ram-Lak default)
-        useGPU = 0; %boolean: true -> use GPU
+        useGPU = 0; %boolean: true -> use CUDA enabled GPU
         interptype = 'linear'; %interpolateion type, set linear default
         path %path of raw projections
         outputPath %path of reconstructions
@@ -343,53 +343,6 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.MIP = [];
         end
         
-        %filters projections (only ram-lak functionality implemented)
-        function filterProjections(obj)
-            %FILTERING with x,y,z centred on object with u offset on optic axis.            
-            switch obj.axisDirection
-                case 'horiz'
-                    ftDimension = 1;
-                    if isempty(obj.filteredProj)
-                        obj.filteredProj = single(zeros(obj.getWidth,obj.getHeight,obj.nProj));
-                    end
-                    currentFilter = obj.generateFilter;
-                    padSizeVector = [(size(currentFilter,1)-size(obj.projections,1))/2,0];
-                case 'vert'
-                    ftDimension = 2;
-                    if isempty(obj.filteredProj)
-                        obj.filteredProj = single(zeros(obj.getHeight,obj.getWidth,obj.nProj));
-                    end
-                    currentFilter = obj.generateFilter;
-                    padSizeVector = [0,(size(currentFilter,2)-size(obj.projections,2))/2];
-                otherwise
-                    error('Incorrect axisDirection property');
-            end
-            
-            fillIndexes = size(currentFilter,2)/2-size(obj.projections,2)/2+1:size(currentFilter,2)/2-size(obj.projections,2)/2+obj.getWidth;
-            for i=1:obj.nProj
-                disp(i/obj.nProj*100);
-                p = obj.projections(:,:,i);
-                fproj = padarray(p,padSizeVector,'replicate','both');
-                fproj = fft(fproj,[],ftDimension);
-                fproj = fproj.*currentFilter;
-                fproj = real(ifft(fproj,[],ftDimension));
-                if obj.useGPU==1
-                    if ftDimension==1
-                        obj.filteredProj(:,:,i) = gather(fproj(fillIndexes,:));
-                    else
-                        obj.filteredProj(:,:,i) = gather(fproj(:,fillIndexes));
-                    end
-                else
-                    if ftDimension==1
-                        obj.filteredProj(:,:,i) = fproj(fillIndexes,:);
-                    else
-                        obj.filteredProj(:,:,i) = fproj(:,fillIndexes);
-                    end
-                end
-                imagesc(obj.filteredProj(:,:,i)); drawnow;
-            end
-        end 
-        
         % @param double mnidx, minimum slice number index
         % @param double mxidx, maximum slice number index to reconstruct
         % @param boolean displayBoolean, true to display slices
@@ -492,6 +445,11 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             end     
         end
         
+        
+    end
+    
+    %% Protected Methods (only accessed by super and subclasses)
+    methods (Access = protected)
         %@param double index, index of sinogram
         %@param varargin
         %           - double[] aorVector, length obj.nProj of a variable
@@ -518,6 +476,53 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                     out = OPTSystem.shiftSinogram(squeeze(obj.projections(index,:,:)),aorVector);
             end
         end
+        
+        %filters projections (only ram-lak functionality implemented)
+        function filterProjections(obj)
+            %FILTERING with x,y,z centred on object with u offset on optic axis.            
+            switch obj.axisDirection
+                case 'horiz'
+                    ftDimension = 1;
+                    if isempty(obj.filteredProj)
+                        obj.filteredProj = single(zeros(obj.getWidth,obj.getHeight,obj.nProj));
+                    end
+                    currentFilter = obj.generateFilter;
+                    padSizeVector = [(size(currentFilter,1)-size(obj.projections,1))/2,0];
+                case 'vert'
+                    ftDimension = 2;
+                    if isempty(obj.filteredProj)
+                        obj.filteredProj = single(zeros(obj.getHeight,obj.getWidth,obj.nProj));
+                    end
+                    currentFilter = obj.generateFilter;
+                    padSizeVector = [0,(size(currentFilter,2)-size(obj.projections,2))/2];
+                otherwise
+                    error('Incorrect axisDirection property');
+            end
+            
+            fillIndexes = size(currentFilter,2)/2-size(obj.projections,2)/2+1:size(currentFilter,2)/2-size(obj.projections,2)/2+obj.getWidth;
+            for i=1:obj.nProj
+                disp(i/obj.nProj*100);
+                p = obj.projections(:,:,i);
+                fproj = padarray(p,padSizeVector,'replicate','both');
+                fproj = fft(fproj,[],ftDimension);
+                fproj = fproj.*currentFilter;
+                fproj = real(ifft(fproj,[],ftDimension));
+                if obj.useGPU==1
+                    if ftDimension==1
+                        obj.filteredProj(:,:,i) = gather(fproj(fillIndexes,:));
+                    else
+                        obj.filteredProj(:,:,i) = gather(fproj(:,fillIndexes));
+                    end
+                else
+                    if ftDimension==1
+                        obj.filteredProj(:,:,i) = fproj(fillIndexes,:);
+                    else
+                        obj.filteredProj(:,:,i) = fproj(:,fillIndexes);
+                    end
+                end
+                imagesc(obj.filteredProj(:,:,i)); drawnow;
+            end
+        end 
     end
     
     %% Secondary Parameters

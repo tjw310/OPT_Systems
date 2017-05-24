@@ -64,7 +64,8 @@ classdef ConeBeamSystem < OPTSystem
         % @param double mnidx, minimum index of slices to reconstruct
         % @param double mxidx, maximum index of slices to reconstruct
         % @param boolean displayBoolean, true if want to display
-        function reconstruct(obj,mnidx,mxidx,displayBoolean)
+        % @param StepperMotor stepperMotor, class with rotation axis prop
+        function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean)
             if isempty(obj.getAllFilteredProj)
                 obj.filterProjections();
             end
@@ -72,17 +73,17 @@ classdef ConeBeamSystem < OPTSystem
             [xx,zz] = meshgrid(obj.xPixels,obj.zPixels);
             t = 2*pi-obj.theta;
             if obj.getUseGPU == 1
-                xxS = gpuArray(xx+obj.getMotorAxisXDisplacement);
+                xxS = gpuArray(xx+stepperMotor.getX/obj.getPixelSize*objective.getMagnification);
                 zz = gpuArray(zz);
             else
-                xxS = xx+obj.getMotorAxisXDisplacement;
+                xxS = xx+stepperMotor.getX/obj.getPixelSize*objective.getMagnification;
             end
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
             for index=mnidx:mxidx
                 op = obj.getOpticCentre;        
-                motorOffset = obj.getMotorAxisXDisplacement;
                 D = obj.getR;
                 for i = 1:obj.getNProj
+                    motorOffset = -stepperMotor.currentX(i)/obj.getPixelSize*objective.getMagnification;
                     if obj.getUseGPU==1
                         projI = gpuArray(obj.getFilteredProj(i));
                         if i==1
@@ -95,8 +96,8 @@ classdef ConeBeamSystem < OPTSystem
                         projI = (obj.getFilteredProj(i));
                     end
 
-                   u = D.*(xxS*cos(t(i))+zz*sin(t(i))-op(1)-motorOffset)...
-                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)+motorOffset;
+                   u = D.*(xxS*cos(t(i))+zz*sin(t(i))-op(1)+motorOffset)...
+                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset;
 
                    U = (xxS*sin(t(i))-zz*cos(t(i))+D)./D;
                    v = (1./U.*(index-obj.getHeight/2-op(2)))+op(2);                       

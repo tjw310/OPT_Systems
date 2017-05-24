@@ -345,7 +345,7 @@ classdef (Abstract) OPTSystem < handle
         % @param boolean displayBoolean, true to display slices
         % @param StepperMotor stepperMotor, provides rotation axis
         % displacement values
-        function reconstructProjections(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean)
+        function reconstructProjections(obj,mnidx,mxidx,stepperMotor,displayBoolean)
             reconstructionFolderName = 'Reconstructions';
             if ~isdir(fullfile(obj.path,reconstructionFolderName))
                 mkdir(obj.path,reconstructionFolderName);
@@ -357,7 +357,7 @@ classdef (Abstract) OPTSystem < handle
             if displayBoolean==1
                 figure;
             end
-            reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean);
+            reconstruct(obj,mnidx,mxidx,stepperMotor,displayBoolean);
         end
         
         function normaliseReconstructions(obj)
@@ -452,8 +452,13 @@ classdef (Abstract) OPTSystem < handle
         
         %@param double index, index of sinogram
         %@param StepperMotor stepperMotor
-        function out = getShiftedSinogram(obj,index,stepperMotor,objective)
-            aorVector = (stepperMotor.xDisplacement(obj.theta)+stepperMotor.getX)/obj.getPixelSize*objective.getMagnification;
+        function out = getShiftedSinogram(obj,index,stepperMotor)
+            if isempty(stepperMotor.getXMotion)
+                aorVector = stepperMotor.getTotalX(obj.nProj)/obj.getPixelSize*
+            else
+                aorVector = stepperMotor.getXMotion./obj.getBinFactor-stepperMotor.getX./obj.getBinFactor^2;
+            end
+            plot(aorVector); figure;
             switch obj.axisDirection
                 case 'horiz'
                     out = OPTSystem.shiftSinogram(squeeze(obj.projections(:,index,:)),aorVector);
@@ -557,6 +562,7 @@ classdef (Abstract) OPTSystem < handle
                      ramp_kernel = padarray(ramp_kernel,[0,(filt_len-obj.getWidth)/2],'both');
                      %ramp_kernel = padarray(ramp_kernel,[0,filt_len/2-obj.getWidth/2+obj.getMotorAxisXDisplacement],'pre');
                      %ramp_kernel = padarray(ramp_kernel,[0,filt_len/2-obj.getWidth/2-obj.getMotorAxisXDisplacement],'post');
+                     figure; imagesc(ramp_kernel); figure;
                      filt = abs(fft(ramp_kernel,[],2));
             end
                     

@@ -26,6 +26,8 @@ objective = Objective(NA,mag);
 %object = [PointObject(0.1,0.1,0.1),PointObject(0,0.1,0),PointObject(0,0.1,-0.1),PointObject(0.1,0.1,0),PointObject(-0.1,0.1,-0.1)];
 
 object = [PointObject(.05,0.05,0),PointObject(.05,0,0),PointObject(0,0,0)];
+object = [PointObject(.05,0,0)];
+stepperMotor = StepperMotor(.05,0,0,[],[]);
 
 system.setLambda(500e-6);
 system.setWidth(512);
@@ -36,9 +38,8 @@ system.setNAngles(360);
 system.setNProj(400);
 system.setBinFactor(4);
 system.setApertureRadius(objective.getRadiusPP/apertureReductionFactor);
-system.setOpticCentre([1000,400]);
+system.setOpticCentre([0,0]);
 system.setR(3000);
-system.setMotorAxisXDisplacement(0);
 
 %system2 = Standard4fSystem();
 system2.setBinFactor(system.getBinFactor);
@@ -51,12 +52,10 @@ system2.setNAngles(system.getNAngles);
 system2.setNProj(system.getNProj);
 system2.setApertureRadius(system.getApertureRadius);
 system2.setOpticCentre(system.getOpticCentre*system2.getBinFactor);
-system2.setMotorAxisXDisplacement(system.getMotorAxisXDisplacement*system2.getBinFactor);
 
 %system3 = ConeBeamSystem();
 system3.setR(3000);
 system3.setOpticCentre([0,0]);
-system3.setMotorAxisXDisplacement(100);
 system3.setBinFactor(system.getBinFactor);
 system3.setLambda(system.getLambda);
 system3.setWidth(system.getWidth*system2.getBinFactor);
@@ -70,8 +69,8 @@ system3.setApertureRadius(system.getApertureRadius);
 %%
 %round(object(1).getYPixelPosition(system,objective))
 %system.reconstructProjections(round(object(1).getYPixelPosition(system,objective)),round(object(1).getYPixelPosition(system,objective)),1);
-system.simulateProjections(objective,object,0);
-system2.simulateProjections(objective,object,0);
-system3.simulateProjections(objective,object,0);
+%system.simulateProjections(objective,object,0);
+%system2.simulateProjections(objective,object,0);
+%system3.simulateProjections(objective,object,0);
 
 

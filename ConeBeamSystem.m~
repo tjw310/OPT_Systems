@@ -45,9 +45,7 @@ classdef ConeBeamSystem < OPTSystem
         % @param double[][] P, aperture function
         % @param double[] opticCentre, binned opticCentre [x,y] in mm from
         % centre of FOV
-        % @param boolean varargin, display bool, true==new figure and
-        % display psf
-        function out = getPSFimage(obj,x,y,z,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opticCentre,varargin)
+        function out = getPSFimage(obj,x,y,z,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opticCentre)
             obj.calculateApertureDisplacement(objective);
             mz = objective.getMagnification./(1+z*obj.apertureDisplacement/(objective.getF^2)); %Axially dependant magnfication
             alpha = -1/(obj.getLambda*objective.getF)*(x+(imageX-opticCentre(1))./mz+opticCentre(1)/objective.getMagnification);
@@ -59,11 +57,7 @@ classdef ConeBeamSystem < OPTSystem
             h_scaled = interp2(psfscX,psfscY,h,alpha,beta,'linear');
             %out = double(1/objective.getMagnification^4.*mz^2.*h_scaled*1/(objective.getF*obj.getLambda)^4);
             out = h_scaled./nansum(h_scaled(:)).*(mz/objective.getMagnification)^2.*pi*objective.getEffNA(obj.getApertureRadius)^2;
-            out(isnan(out)) = 0;
-            
-            if nargin==14 && varargin{1}
-                figure; imagesc(imageX(1,:)/objective.getMagnification,imageY(:,1)/objective.getMagnification,out); axis square; drawnow;
-            end
+            out(isnan(out)) = 0; 
         end
         
         % @param string outputPath, path to save reconstructions
@@ -139,8 +133,7 @@ classdef ConeBeamSystem < OPTSystem
         % calculates magnifcation at z location = zcos(beta)-xsin(beta)
         % @param Objective objective
         % @param double z, in mm
-        % @param double x, in mm
-        % @param double beta, projection angle in radians
+        % @param doub
         function out = magnifcationAtLocation(obj,objective,z,x,beta)
             out = objective.getMagnification/(1+obj.apertureDisplacement/objective.getF^2*(z*cos(beta)-x*sin(beta)));
         end

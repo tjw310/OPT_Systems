@@ -70,6 +70,7 @@ classdef StepperMotor < handle
             obj.xMotion = [];
             obj.zMotion = [];
         end
+        
         %@return double
         function out = getX(obj)
             out = obj.x;
@@ -90,7 +91,6 @@ classdef StepperMotor < handle
         function out = getZMotion(obj)
             out = obj.zMotion;
         end
-        
         %@param double nProj, total number of projections
         %@return double[]
         function out = getTotalX(obj,nProj)

@@ -20,15 +20,24 @@
 
 %system.reconPS(object.getY,object.getY)
 
+
+
+%object = [PointObject(-.05,0,-.05),PointObject(0,0,0)];
+
+%%
 %system = ConeBeamSystem();
 NA = 0.4; mag = 20; apertureReductionFactor = 10; lambda = 500e-6;
 objective = Objective(NA,mag);
 %object = [PointObject(0.1,0.1,0.1),PointObject(0,0.1,0),PointObject(0,0.1,-0.1),PointObject(0.1,0.1,0),PointObject(-0.1,0.1,-0.1)];
+object = [];
+for i=linspace(-system2.getWidth/2*system2.getPixelSize/objective.getMagnification*.5,system2.getWidth/2*system2.getPixelSize/objective.getMagnification*0.5,1)
+        object = horzcat(object,PointObject(i,0,0));
+end
 
-object = [PointObject(.05,0.05,0),PointObject(.05,0,0),PointObject(0,0,0)];
-object = [PointObject(.05,0,0)];
-stepperMotor = StepperMotor(.05,0,0,[],[]);
-
+%object = [PointObject(.05,0.05,0),PointObject(.05,0,0),PointObject(0,0,0)];
+%object = [PointObject(.05,0,0)];
+stepperMotor = StepperMotor(0,0,0,[],[]);
+% 
 system.setLambda(500e-6);
 system.setWidth(512);
 system.setHeight(512);
@@ -36,7 +45,7 @@ system.setAxisDirection('vert');
 system.setRotationDirection('clock');
 system.setNAngles(360);
 system.setNProj(400);
-system.setBinFactor(4);
+system.setBinFactor(1);
 system.setApertureRadius(objective.getRadiusPP/apertureReductionFactor);
 system.setOpticCentre([0,0]);
 system.setR(3000);
@@ -54,17 +63,17 @@ system2.setApertureRadius(system.getApertureRadius);
 system2.setOpticCentre(system.getOpticCentre*system2.getBinFactor);
 
 %system3 = ConeBeamSystem();
-system3.setR(3000);
-system3.setOpticCentre([0,0]);
-system3.setBinFactor(system.getBinFactor);
-system3.setLambda(system.getLambda);
-system3.setWidth(system.getWidth*system2.getBinFactor);
-system3.setHeight(system.getHeight*system2.getBinFactor);
-system3.setAxisDirection(system.getAxisDirection);
-system3.setRotationDirection(system.getRotationDirection);
-system3.setNAngles(system.getNAngles);
-system3.setNProj(system.getNProj);
-system3.setApertureRadius(system.getApertureRadius);
+% system3.setR(3000);
+% system3.setOpticCentre([0,0]);
+% system3.setBinFactor(system.getBinFactor);
+% system3.setLambda(system.getLambda);
+% system3.setWidth(system.getWidth*system2.getBinFactor);
+% system3.setHeight(system.getHeight*system2.getBinFactor);
+% system3.setAxisDirection(system.getAxisDirection);
+% system3.setRotationDirection(system.getRotationDirection);
+% system3.setNAngles(system.getNAngles);
+% system3.setNProj(system.getNProj);
+% system3.setApertureRadius(system.getApertureRadius);
 %system.simulateProjections(objective,object,1);
 %%
 %round(object(1).getYPixelPosition(system,objective))

@@ -1,4 +1,4 @@
-classdef (Abstract) OPTSystem < handle 
+classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
     %Class defining an optical projection system and its properties
     
     properties (Access = private)
@@ -11,6 +11,7 @@ classdef (Abstract) OPTSystem < handle
         pxSz = 6.5e-3 %size of sensor pixels in mm (6.5e-3 by default)
         lambda = 500e-6; %wavelength in mm
         apertureRadius %radius of aperture stop in mm
+        dofOffset = 0 %offset of the depth of field in object space mm
         
         % Large Data
         projections %raw projection information
@@ -26,6 +27,11 @@ classdef (Abstract) OPTSystem < handle
         binFactor = 1; %value of bin factor
         unbinnedWidth %number of pixels in direction perpendicular to the rotation axis (not binned)
         unbinnedHeight %number of pixels in direction parallel to the rotation axis (not binned)
+    end
+    
+    properties (Access = public)
+        % Simulation Parameters
+        AF % Ambiguity Function object
     end
     
     %% Constructor and get/set methods
@@ -98,6 +104,7 @@ classdef (Abstract) OPTSystem < handle
         function out = getOutputPath(obj)
             out = obj.outputPath;
         end
+        
         % @param double index, projection number
         function out = getFilteredProj(obj,index)
             out = obj.filteredProj(:,:,index);
@@ -171,10 +178,12 @@ classdef (Abstract) OPTSystem < handle
             obj.pxSz = pixelSize;
         end
         %@param double width, pixel distance perpendicular to rotation axis
+        %(unbinned)
         function setWidth(obj,width)
             obj.unbinnedWidth = width;
         end
         %@param double width, pixel distance parallel to rotation axis
+        %(unbinned)
         function setHeight(obj,height)
             obj.unbinnedHeight = height;
         end
@@ -358,6 +367,8 @@ classdef (Abstract) OPTSystem < handle
                 figure;
             end
             reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean);
+            save(fullfile(obj.path,'objective.mat'),'objective');
+            save(fullfile(obj.path,'stepperMotor.mat'),'stepperMotor');
         end
         
         function normaliseReconstructions(obj)
@@ -422,14 +433,17 @@ classdef (Abstract) OPTSystem < handle
                 I = zeros(obj.getHeight,obj.getWidth);
                 if length(pointObject)==1
                     rotObject = stepperMotor.rotate(pointObject,i,obj.theta); % new point object in mm loc after rotation
-                    I = obj.getPSFimage(rotObject.getX,rotObject.getY,rotObject.getZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
+                    opticZ = rotObject.getZ-obj.dofOffset; % depth of object in z relative to the objective focal plane in mm
+                    I = obj.getPSFimage(rotObject.getX,rotObject.getY,opticZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
                 else
                     for currentPointObject = pointObject
-                        rotObject = stepperMotor.rotate(pointObject,i,obj.theta); % new point object in mm loc after rotation
-                        psf = obj.getPSFimage(rotObject.getX,rotObject.getY,rotObject.getZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
+                        rotObject = stepperMotor.rotate(currentPointObject,i,obj.theta); % new point object in mm loc after rotation
+                        opticZ = rotObject.getZ-obj.dofOffset; % depth of object in z relative to the objective focal plane in mm
+                        psf = obj.getPSFimage(rotObject.getX,rotObject.getY,opticZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
                         I = I + psf;
                     end
                 end
+                disp(sprintf('i=%.0f, z=%.5f',i,opticZ));
                 obj.setProjection(I,i);
                 if showBoolean==1
                     imagesc(I); axis equal tight; colorbar; drawnow;
@@ -462,13 +476,105 @@ classdef (Abstract) OPTSystem < handle
             end
         end
         
+        % returns current object space depth of field in binned image space pixels
+        %@param double n, refractive index of immersion fluid
+        %@param Objective objective
+        function out = DoF(obj,objective,n)
+            DoFmm = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,n);
+            out = DoFmm*objective.getMagnification/obj.getPixelSize;
+        end
+        
+        % returns current system object space NA
+        %@param Objective objective
+        function out = NA(obj,objective)
+            out = objective.getEffNA(obj.apertureRadius);
+        end
+               
+        % @param Objective objective
+        % @return double out, FWHM spatial resolution of current setup in
+        % mm
+        function out = resolution(obj,objective)
+            out = obj.lambda/(2*objective.getEffNA(obj.apertureRadius));
+        end
+        
+        % returns current object space depth of field in binned image space pixels
+        % @param Objective objective
+        function out = getDoFOffset(obj,objective)
+            out = obj.dofOffset*objective.getMagnification/obj.getPixelSize;
+        end
+        
+        % setup for full DoF OPT - sets the system aperture radius and
+        % motor axis location
+        % @param double n, refractive index of immersion fluid
+        % @param Objective objective
+        % @param StepperMotor stepperMotor
+        function setupFullDoFOPT(obj,objective,stepperMotor,n)
+            DoF = obj.getWidth*obj.getPixelSize/objective.getMagnification;
+            NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;
+            obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;
+            stepperMotor.setZ(0);
+        end
+        
+        % setup for half DoF OPT - sets the system aperture radius and
+        % motor axis location
+        % @param double n, refractive index of immersion fluid
+        % @param Objective objective
+        function setupHalfDoFOPT(obj,objective,stepperMotor,n,varargin)
+            if nargin==4
+                DoF = obj.getWidth*obj.getPixelSize/2/objective.getMagnification;
+                NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;
+                obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;
+            elseif nargin==5
+                DoF = obj.DoF(objective,n)*obj.getPixelSize/objective.getMagnification;
+            end
+            obj.dofOffset = DoF/2;
+            stepperMotor.setZ(0);
+        end
+    
+    end
+    
+    %% Ambiguity Function and OTFS
+    methods
+       % generates AmbiguityFunction object, and fills value using obj and objective parameters
+       % @param Objective objective
+       % @param boolean varargin, display boolean, 1==display 
+       function calculateAF(obj,objective,varargin)
+            obj.AF = AmbiguityFunction();
+            if nargin==3
+                obj.AF.generate(obj,objective,true)
+            else
+                obj.AF.generate(obj,objective);
+            end
+       end
+       
+       % calculates object space psf XZ profile for zRagne = 2*DoF
+       % @oaram Objective objective
+       function getXZpsfProfile(obj,objective)
+           if isempty(obj.AF)
+               error('Please calculate ambiguity function first');
+           else
+               theta=0; numberBesselZeros = 5;
+               zLimit = 2*objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,1);  
+               zRange = linspace(-zLimit,zLimit,256);
+               for i=1:length(zRange)
+                   point = PointObject(0,0,zRange(i));
+                   [~,psfScale,~,rPSF] = obj.AF.getPSF(obj,objective,point,theta,numberBesselZeros,'czt');
+                   xzPSF(i,:) = rPSF;
+                   if rem(i,round(length(zRange)/20))==0
+                    disp(sprintf('Completion percentage: %.1f%%',i/length(zRange)*100));
+                   end
+               end
+
+               figure; imagesc(psfScale,zRange,xzPSF./max(xzPSF(:))); axis square; 
+               figure; plot(zRange,xzPSF(:,size(xzPSF,2)/2+1)./max(xzPSF(:))); drawnow;
+           end
+       end
+               
         
     end
     
     %% Protected Methods (only accessed by super and subclasses)
     methods (Access = protected)
-        
-        
         %filters projections (only ram-lak functionality implemented)
         function filterProjections(obj)
             %FILTERING with x,y,z centred on object with u offset on optic axis.            

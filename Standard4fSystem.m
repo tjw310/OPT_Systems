@@ -25,7 +25,7 @@ classdef Standard4fSystem < OPTSystem
                 c = fftshift(fft2(Q));
                 h = c.*conj(c);
                 h_scaled = double(interp2(psfscX,psfscY,h,alpha,beta,'linear'));
-                out = h_scaled./nansum(h_scaled(:));
+                out = h_scaled./nansum(h_scaled(:)).*pi*objective.getEffNA(obj.getApertureRadius)^2;
                 %out = double(1/objective.getMagnification^2.*h_scaled*1/(objective.getF*obj.getLambda)^4);
                 out(isnan(out)) = 0;
         end
@@ -38,7 +38,7 @@ classdef Standard4fSystem < OPTSystem
         % @param Objective objective, provides magnfication information
         function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean)
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
-            [xShift,zShift] = meshgrid((1:obj.getWidth)+stepperMotor.getX/obj.getPixelSize*objective.getMagnification,(1:obj.getWidth)+stepperMotor.getZ/obj.getPixelSize*objective.getMagnification);
+            [xShift,zShift] = meshgrid((1:obj.getWidth)+stepperMotor.getX/obj.getPixelSize*objective.getMagnification,(1:obj.getWidth)-stepperMotor.getZ/obj.getPixelSize*objective.getMagnification);
             for index = mnidx:mxidx
                 sinogram = obj.getShiftedSinogram(index,stepperMotor,objective);
                 slice = iradon(circshift(sinogram,[-1,0]),obj.getNAngles/obj.getNProj,obj.getInterptype,obj.getFilter,1,size(sinogram,1));

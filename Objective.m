@@ -66,7 +66,11 @@ classdef Objective < handle
         
         %get effective NA using an aperture of radius apertureRadius (mm)
         function effNA = getEffNA(obj,apertureRadius)
-            effNA = apertureRadius/obj.radiusPP*obj.NA;
+            if apertureRadius<obj.radiusPP
+                effNA = apertureRadius/obj.radiusPP*obj.NA;
+            else
+                effNA = obj.NA;
+            end
         end
         
         %gets effective object space FOV from image field FOV and mag
@@ -78,7 +82,7 @@ classdef Objective < handle
         % @param pxSz - pixel size of detector in mm
         % @param n - refractive index of immersion medium
         % @param lambda - wavelength of light (mm)
-        function DoF = getDoF(obj,pxSz,lambda)
+        function DoF = getDoF(obj,pxSz,lambda,n)
             DoF = n*(lambda/(obj.NA)^2+pxSz/(obj.magnification*obj.NA));      
         end
         
@@ -87,7 +91,7 @@ classdef Objective < handle
         % @param n - refractive index of immersion medium
         % @param lambda - wavelength of light (mm)
         % @param apertureRadius - radius of aperture placed in pupil plane
-        function DoF = getEffDoF(obj,pxSz,lambda,apertureRadius)
+        function DoF = getEffDoF(obj,pxSz,lambda,apertureRadius,n)            
             reducedNA = obj.getEffNA(apertureRadius);
             DoF = n*(lambda/(reducedNA)^2+pxSz/(obj.magnification*reducedNA));      
         end

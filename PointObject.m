@@ -41,9 +41,11 @@ classdef PointObject
             zIdeal = (obj.x-stepperMotor.getX).*sin(theta)+(obj.z-stepperMotor.getZ).*cos(theta)+stepperMotor.getZ;
             hold on; plot3(xIdeal,yIdeal,zIdeal,'r'); hold off;
             
-            figure; plot(1:length(theta),xC-xIdeal);
-            hold on; plot(stepperMotor.getZMotion.*sin(theta)-stepperMotor.getXMotion.*cos(theta)+stepperMotor.getXMotion); hold off;
-            xlabel('projection number'); ylabel('x displacement (mm)'); title('X-displacement from ideal sinusoid');
+            if ~isempty(stepperMotor.getZMotion)
+                figure; plot(1:length(theta),xC-xIdeal);
+                hold on; plot(stepperMotor.getZMotion.*sin(theta)-stepperMotor.getXMotion.*cos(theta)+stepperMotor.getXMotion); hold off;
+                xlabel('projection number'); ylabel('x displacement (mm)'); title('X-displacement from ideal sinusoid');
+            end
             
         end
     end

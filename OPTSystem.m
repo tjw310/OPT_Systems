@@ -422,7 +422,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 [imageX,imageY] = gpuArray(meshgrid(xRange,yRange));
                 [psfscX,psfscY] = gpuArray(meshgrid(obj.xPixels./obj.getWidth*2*uMax,obj.yPixels./obj.getHeight*2*vMax));
             else
-                [xApPlane,yApPlane] = (meshgrid(obj.xPixels./obj.getWidth*2*objective.getRadiusPP,obj.yPixels./obj.getWidth*2*objective.getRadiusPP));
+                [xApPlane,yApPlane] = (meshgrid(obj.xPixels./obj.getWidth*4*objective.getRadiusPP,obj.yPixels./obj.getWidth*4*objective.getRadiusPP));
                 rApPlane = sqrt(xApPlane.^2+yApPlane.^2);
                 P = (ones(size(xApPlane))); P(rApPlane>obj.apertureRadius)=0; %Aperture function (circle)
                 [imageX,imageY] = (meshgrid(xRange,yRange));

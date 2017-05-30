@@ -61,6 +61,9 @@ classdef ConeBeamSystem < OPTSystem
             out = h_scaled./nansum(h_scaled(:)).*(mz/objective.getMagnification)^2.*pi*objective.getEffNA(obj.getApertureRadius)^2;
             out(isnan(out)) = 0;
             
+            PSF = PointSpreadFunction(out,imageX(1,:)/objective.getMagnification,imageY(:,1)/objective.getMagnification);
+            disp(PSF.getFWHM);
+            
             if nargin==14 && varargin{1}
                 figure; imagesc(imageX(1,:)/objective.getMagnification,imageY(:,1)/objective.getMagnification,out); axis square; drawnow;
             end

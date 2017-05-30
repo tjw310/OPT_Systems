@@ -14,12 +14,13 @@ classdef AmbiguityFunction < handle
         function out = getValue(obj)
             out = obj.value;
         end
-        function [x,y] = getScales(obj)
-            x = obj.xScale;
-            y = obj.yScale;
-        end
         function out = getOTF(obj)
             out = obj.OTF;
+        end
+        function show(obj)
+            figure; imagesc(obj.tau,obj.mu,real(obj.value)); xlabel('\tau = \lambda mfw (mm)');
+                ylabel('mw/f(z2cos\theta-x2sin\theta) (mm)');
+            axis square; title('Real-part Ambiguity Function of Circular Pupil'); drawnow;
         end
     end
     
@@ -29,27 +30,21 @@ classdef AmbiguityFunction < handle
         % used
         % @param OPTSystem optSys
         % @param Objective, objective
-        % @param Boolean varargin, display boolean, 1==draw new figure
+        % @param Boolean varargin, display boolean, true==draw new figure
         function generate(obj,optSys,objective,varargin)
             %calculates shifted ambiguity function (AF_shift) for circular pupils
-
-            if optSys.getWidth<256
-                nPx = 256;
-            else
-                nPx = optSys.getWidth;
-            end
-            
+            nPx = 256;
             wMax = objective.getEffNA(optSys.getApertureRadius)*objective.getF;
            
-            s_scale = 2*wMax.*linspace(-1,1-1/nPx,nPx);
-            t_scale = 4*wMax.*linspace(-1,1-1/nPx,nPx);
+            s_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
+            t_scale = 8*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
             
             [s,t] = meshgrid(s_scale,t_scale);
             
-            obj.tau = 2*wMax.*linspace(-1,1-1/nPx,nPx);
+            obj.tau = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
             dt = (max(t_scale)-min(t_scale))/nPx;
             mu_max = 1/(2*dt);
-            obj.mu = mu_max.*linspace(-1,1-1/nPx,nPx);
+            obj.mu = mu_max.*(-nPx/2:nPx/2-1)/(0.5*nPx);
 
             r1 = sqrt(t.^2+s.^2);
             Norm = zeros(size(s));
@@ -83,6 +78,7 @@ classdef AmbiguityFunction < handle
             if nargin==4 && varargin{1}
                 figure; imagesc(obj.tau,obj.mu,real(obj.value)); xlabel('\tau = \lambda mfw (mm)');
                 ylabel('mw/f(z2cos\theta-x2sin\theta) (mm)');
+             axis square; title('Real-part Ambiguity Function of Circular Pupil'); drawnow;
             end
         end
         
@@ -132,7 +128,7 @@ classdef AmbiguityFunction < handle
         % @return double[][] rampPSF, 2D point spread function with ramp
         % filter applied in frequency space for OPT reconstructions
         % @return double[] rPSF, radial point spread function
-        function [PSF,scalePSF,rampPSF,rPSF] = getPSF(obj,optSys,objective,point,theta,numberBesselZeros,method,varargin)  
+        function [PSF,xPsfScale,yPsfScale,rampPSF,rPSF] = getPSF(obj,optSys,objective,point,theta,numberBesselZeros,method,varargin)  
             if isempty(method)
                 method = 'fft';
             end
@@ -148,20 +144,15 @@ classdef AmbiguityFunction < handle
                 case 'fft'
                     sz = 4096;
                     pdsz = (sz-size(DTF,1))/2;
-                    rampPSFlarge = ifftshift(ifft2(ifftshift(padarray(DTF,[pdsz,pdsz]).*repmat(abs(linspace(-1,1,sz)),sz,1))));   
-                    ramp_psf = rampPSFlarge(pdsz+1:pdsz+size(DTF,1),pdsz+1:pdsz+size(DTF,1));
                     PSFlarge = ifftshift(ifft2(ifftshift(padarray(DTF,[pdsz,pdsz]))));
                     psf = PSFlarge(pdsz+1:pdsz+size(DTF,1),pdsz+1:pdsz+size(DTF,1));
                     uMax = du*(sz-1)/2;
                     scalePSF = (-size(DTF,1)/2:size(DTF,1)/2-1)./(2*uMax);
-                    xmax = size(DTF,1)/(4*uMax);
                     PSF = real(psf);
-                    rampPSF = real(ramp_psf);
-                    m = size(DTF,1);
                 case 'czt'
                     bessel_zeros = AmbiguityFunction.besselzero(1,numberBesselZeros,1);
                     x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/objective.getEffNA(optSys.getApertureRadius)/2; %chirp z max frequency
-                    m = optSys.getWidth;
+                    m = 256;
                     psf = AmbiguityFunction.iczt_TW(DTF,du,x_ft_max,m);
                     ramp_psf = AmbiguityFunction.iczt_TW(DTF.*repmat(abs(-size(DTF,2)/2:size(DTF,2)/2-1),size(DTF,1),1),du,x_ft_max,m); %performs inverse chirp z-transform
                     inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
@@ -181,17 +172,23 @@ classdef AmbiguityFunction < handle
                     xPsfScale = xRot+scalePSF; yPsfScale = point.getY+scalePSF;
                 case 'ConeBeamSystem'
                     opCentre = optSys.getOpticCentre.*optSys.getPixelSize;
-                    magAxial = optSys.magnifcationAtLocation(objective,zRot,0,0);
-                    xPsfScale = (xRot-opCentre(1))*magAxial/objective.getMagnification+opCentre(1]+scalePSF*magAxial/objective.getMagnification;
-                    yPsfScale = (point.getY-opCentre(2))*magAxial/objective.getMagnification+opCentre(2)+scalePSF*magAxial/objective.getMagnification;
+                    magRatio = optSys.magnifcationAtLocation(objective,zRot,0,0)/objective.getMagnification;
+                    PSF = PSF.*magRatio^2;
+                    rampPSF = rampPSF.*magRatio^2;
+                    xPsfScale = (xRot-opCentre(1))*magRatio+opCentre(1)+scalePSF*magRatio;
+                    yPsfScale = (point.getY-opCentre(2))*magRatio+opCentre(2)+scalePSF*magRatio;
+            end
             
+            xPsfScale = -1*xPsfScale; yPsfScale = -1*yPsfScale; %to account for magnification inversion
             
             rPSF = PSF(:,size(PSF,2)/2+1);
+            
+            PSF = PointSpreadFunction(PSF,xPsfScale,yPsfScale);
 
             if nargin==8 && varargin{1}
                 figure;
-                subplot(1,2,1); imagesc(xRot+scalePSF,point.getY+scalePSF,PSF); title('PSF'); xlabel('(mm)'); ylabel(num2str(zRot)); axis square;
-                subplot(1,2,2); imagesc(xRot+scalePSF,point.getY+scalePSF,rampPSF); title('PSF with Ramp Filter');xlabel('(mm)'); axis square; drawnow;
+                subplot(1,2,1); imagesc(xPsfScale,yPsfScale,PSF); title('PSF'); xlabel('(mm)'); ylabel(num2str(zRot)); axis square;
+                subplot(1,2,2); imagesc(xPsfScale,yPsfScale,rampPSF); title('PSF with Ramp Filter');xlabel('(mm)'); axis square; drawnow;
             end
 
         end

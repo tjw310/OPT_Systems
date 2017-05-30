@@ -14,10 +14,6 @@ classdef AmbiguityFunction < handle
         function out = getValue(obj)
             out = obj.value;
         end
-        function [x,y] = getScales(obj)
-            x = obj.xScale;
-            y = obj.yScale;
-        end
         function out = getOTF(obj)
             out = obj.OTF;
         end
@@ -148,28 +144,20 @@ classdef AmbiguityFunction < handle
                 case 'fft'
                     sz = 4096;
                     pdsz = (sz-size(DTF,1))/2;
-                    rampPSFlarge = ifftshift(ifft2(ifftshift(padarray(DTF,[pdsz,pdsz]).*repmat(abs(linspace(-1,1,sz)),sz,1))));   
-                    ramp_psf = rampPSFlarge(pdsz+1:pdsz+size(DTF,1),pdsz+1:pdsz+size(DTF,1));
                     PSFlarge = ifftshift(ifft2(ifftshift(padarray(DTF,[pdsz,pdsz]))));
                     psf = PSFlarge(pdsz+1:pdsz+size(DTF,1),pdsz+1:pdsz+size(DTF,1));
                     uMax = du*(sz-1)/2;
                     scalePSF = (-size(DTF,1)/2:size(DTF,1)/2-1)./(2*uMax);
-                    xmax = size(DTF,1)/(4*uMax);
                     PSF = real(psf);
-                    rampPSF = real(ramp_psf);
-                    m = size(DTF,1);
                 case 'czt'
                     bessel_zeros = AmbiguityFunction.besselzero(1,numberBesselZeros,1);
                     x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/objective.getEffNA(optSys.getApertureRadius)/2; %chirp z max frequency
                     m = 256;
                     psf = AmbiguityFunction.iczt_TW(DTF,du,x_ft_max,m);
-                    ramp_psf = AmbiguityFunction.iczt_TW(DTF.*repmat(abs(-size(DTF,2)/2:size(DTF,2)/2-1),size(DTF,1),1),du,x_ft_max,m); %performs inverse chirp z-transform
                     inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
-                    ramp_psf(psf<0)=ramp_psf(psf<0).*-1;
                     inFocusPSF(inFocusPSF<0)=inFocusPSF(inFocusPSF<0).*-1;
                     psf(psf<0)=psf(psf<0).*-1;
                     PSF = real(psf)./sum(real(inFocusPSF(:)));
-                    rampPSF = real(ramp_psf)./sum(real(inFocusPSF(:)));
                     scalePSF = (-1:2/m:1-2/m).*x_ft_max;
                 otherwise
                     error('Method must be either fft or czt');
@@ -183,7 +171,6 @@ classdef AmbiguityFunction < handle
                     opCentre = optSys.getOpticCentre.*optSys.getPixelSize;
                     magRatio = optSys.magnifcationAtLocation(objective,zRot,0,0)/objective.getMagnification;
                     PSF = PSF.*magRatio^2;
-                    rampPSF = rampPSF.*magRatio^2;
                     xPsfScale = (xRot-opCentre(1))*magRatio+opCentre(1)+scalePSF*magRatio;
                     yPsfScale = (point.getY-opCentre(2))*magRatio+opCentre(2)+scalePSF*magRatio;
             end
@@ -191,11 +178,11 @@ classdef AmbiguityFunction < handle
             xPsfScale = -1*xPsfScale; yPsfScale = -1*yPsfScale; %to account for magnification inversion
             
             rPSF = PSF(:,size(PSF,2)/2+1);
+            
+            PSF = PointSpreadFunction(PSF,xPsfScale,yPsfScale);
 
             if nargin==8 && varargin{1}
-                figure;
-                subplot(1,2,1); imagesc(xPsfScale,yPsfScale,PSF); title('PSF'); xlabel('(mm)'); ylabel(num2str(zRot)); axis square;
-                subplot(1,2,2); imagesc(xPsfScale,yPsfScale,rampPSF); title('PSF with Ramp Filter');xlabel('(mm)'); axis square; drawnow;
+                PSF.show;
             end
 
         end

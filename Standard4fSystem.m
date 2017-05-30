@@ -17,7 +17,9 @@ classdef Standard4fSystem < OPTSystem
         % @param double[][] psfscX,psfscY, point spread function
         % coordinates
         % @param double[][] P, aperture function
-        function out = getPSFimage(obj,x,y,z,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,~)
+        % @param boolean varargin, display bool, true==new figure and
+        % display psf
+        function out = getPSFimage(obj,x,y,z,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,~,varargin)
                 alpha = -1/(obj.getLambda*objective.getF)*(x+imageX./objective.getMagnification);
                 beta = -1/(obj.getLambda*objective.getF)*(y+imageY./objective.getMagnification);
                 k = 2*pi/obj.getLambda; %wavevector in mm^-1
@@ -28,6 +30,10 @@ classdef Standard4fSystem < OPTSystem
                 out = h_scaled./nansum(h_scaled(:)).*pi*objective.getEffNA(obj.getApertureRadius)^2;
                 %out = double(1/objective.getMagnification^2.*h_scaled*1/(objective.getF*obj.getLambda)^4);
                 out(isnan(out)) = 0;
+                
+                if nargin==14 && varargin{1}
+                figure; imagesc(imageX(1,:)/objective.getMagnification,imageY(:,1)/objective.getMagnification,out); axis square; drawnow;
+            end
         end
         
         % @param string outputPath, path to save reconstructions

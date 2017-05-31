@@ -1,17 +1,20 @@
 classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
-    %Class defining an optical projection system and its properties
+    %Class defining an optical projection system and its properties.
+    %Coordinate system is by default centred on motor axis.
+    %
     
     properties (Access = private)
         % Experimental Parameters
         nProj %number of projections
         nAngles %number of angles (either 180 or 360)
-        opticCentre = [0,0] %(x,y) location of optic centre in pixels (unbinned raw value)
+        opticCentre = [0,0] %(x,y) location of optic centre in object space mm
         rotationDirection  %defines rotation direction, either 'clock' or 'anti'
         axisDirection  %define rotation axis direction, either 'horiz' or 'vert'
         pxSz = 6.5e-3 %size of sensor pixels in mm (6.5e-3 by default)
         lambda = 500e-6; %wavelength in mm
         apertureRadius %radius of aperture stop in mm
-        dofOffset = 0 %offset of the depth of field in object space mm
+        focalPlaneOffset % focal plane z-offset from motor axis in mm
+        n = 1; %refractive index of immersion medium, default air=1
         
         % Large Data
         projections %raw projection information
@@ -71,8 +74,13 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         function out = getNProj(obj)
             out = obj.nProj;
         end
+        % gets the optic centre in image space binned pixels
+        function out = getOpticCentrePixels(obj,objective)
+            out = obj.opticCentre/obj.getPixelSize*objective.getMagnification;
+        end
+        % gets the optic centre in object space mm
         function out = getOpticCentre(obj)
-            out = obj.opticCentre/obj.binFactor;
+            out = obj.opticCentre;
         end
         function out = getPixelSize(obj)
             out = obj.pxSz*obj.binFactor;
@@ -98,16 +106,18 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         function out = getAllFilteredProj(obj)
             out = obj.filteredProj;
         end
+        % @param double index, projection number
+        function out = getFilteredProj(obj,index)
+            out = obj.filteredProj(:,:,index);
+        end    
         function out = getInterptype(obj)
             out = obj.interptype;
         end
         function out = getOutputPath(obj)
             out = obj.outputPath;
         end
-        
-        % @param double index, projection number
-        function out = getFilteredProj(obj,index)
-            out = obj.filteredProj(:,:,index);
+        function out = getFocalPlaneOffset(obj)
+            out = obj.focalPlaneOffset;
         end
         function resetDimensions(obj)
             switch obj.axisDirection
@@ -165,7 +175,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         function setNAngles(obj,nAngles)
             obj.nAngles = nAngles;
         end
-        %@param double[] opticCentre, (x,y) location of optic centre
+        %@param double[] opticCentre, (x,y) location of optic centre in mm
         function setOpticCentre(obj,opticCentre)
             obj.opticCentre = opticCentre;
         end
@@ -214,7 +224,6 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
     
     %% abstract methods
     methods (Abstract)
-        out = getPSFimage(obj);
         reconstruct(obj);
     end
     
@@ -267,27 +276,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 otherwise
                     error('Axis direction must be "horiz" or "vert"');
             end
-            
-            
-            
-        end
-        
-        %@param StepperMotor stepperMotor, class that provides AoR angle
-        function rotProjections(obj,stepperMotor)
-            angle = stepperMotor.getAngle;
-            if angle~=0
-                [X,Z]= meshgrid(obj.xPixels,obj.zPixels);           
-                X2 = X*cos(angle/180*pi)-Z*sin(angle/180*pi)-X(1,1);
-                Z2 = Z*cos(angle/180*pi)+X*sin(angle/180*pi)-Z(1,1);
-                obj.opticCentre(1) = obj.opticCentre(1)*cos(angle/180*pi)-obj.opticCentre(2)*sin(angle/180*pi);
-                obj.opticCentre(2) = obj.opticCentre(2)*cos(angle/180*pi)+obj.opticCentre(1)*sin(angle/180*pi);
-
-                for i=1:obj.nProj
-                    disp(i/obj.nProj*100)
-                    single_rot_proj = single(interp2(obj.projections(:,:,i).',X2,Z2,obj.interptype));
-                    obj.projections(:,:,i) = single_rot_proj.';  
-                end  
-            end
+   
         end
         
         %@param int binFactor, choose to square bin the projections
@@ -322,7 +311,8 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             if isempty(obj.MIP)
                 obj.MIP = max(obj.projections,[],3);
             end
-            figure; imagesc(obj.MIP); axis equal tight;
+            figure; imagesc(obj.xPixels*obj.getPixelSize,obj.yPixels*obj.getPixelSize,obj.MIP); 
+            title('Projections Maximum Intensity Projection'); xlabel('mm'); axis equal tight;
         end
         
         %sets single projection using simulation functionality
@@ -354,7 +344,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         % @param boolean displayBoolean, true to display slices
         % @param StepperMotor stepperMotor, provides rotation axis
         % displacement values
-        function reconstructProjections(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean)
+        function reconstructProjections(obj,mnidx,mxidx,stepperMotor,objective,varargin)
             reconstructionFolderName = 'Reconstructions';
             if ~isdir(fullfile(obj.path,reconstructionFolderName))
                 mkdir(obj.path,reconstructionFolderName);
@@ -363,10 +353,13 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 dlmwrite(fullfile(fullfile(obj.path,reconstructionFolderName),'MaxMinValues.txt'),zeros(obj.getHeight,2),';');
             end
             obj.outputPath = fullfile(obj.path,reconstructionFolderName);
-            if displayBoolean==1
+            if nargin==6 && varargin{1}
                 figure;
+                reconstruct(obj,mnidx,mxidx,stepperMotor,objective,true);
+            else
+                reconstruct(obj,mnidx,mxidx,stepperMotor,objective,false);
             end
-            reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean);
+            
             save(fullfile(obj.path,'objective.mat'),'objective');
             save(fullfile(obj.path,'stepperMotor.mat'),'stepperMotor');
         end
@@ -400,8 +393,12 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         %@param PointObject[] pointObject, array of pointObjects
         %@param StepperMotor stepperMotor, stepper motor class provides aor
         %position
-        %@param boolean showBoolean, true if want to display projection
-        function simulateProjections(obj,objective,pointObject,stepperMotor,showBoolean)
+        %@param boolean varargin, true if want to display projection
+        function simulateProjections(obj,objective,pointObject,stepperMotor,varargin)
+            obj.calculateAF(objective);
+            if strcmp(class(obj),'ConeBeamSystem')
+                obj.calculateApertureDisplacement(objective);
+            end
             if isempty(obj.apertureRadius)
                 obj.apertureRadius = 2*objective.getRadiusPP;
             end
@@ -409,44 +406,33 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.setAllProjections(0);
             xRange = obj.xPixels.*obj.getPixelSize; % image space real x coords in mm
             yRange = obj.yPixels.*obj.getPixelSize; % image space real y coords in mm
-            opCentre = obj.getOpticCentre.*obj.getPixelSize; % real image space optic centre location in mm
-            dx = 4*objective.getRadiusPP/obj.getWidth; %spatial frequency sampling inteval in aperture function 
-            uMax = 1/(2*dx);
-            dy = 4*objective.getRadiusPP/obj.getWidth;
-            vMax = 1/(2*dy);
-                
+            
             if obj.useGPU==1
-                [xApPlane,yApPlane] = gpuArray(meshgrid(obj.xPixels./obj.getWidth*4*objective.getRadiusPP,obj.yPixels./obj.getWidth*4*objective.getRadiusPP));
-                rApPlane = sqrt(xApPlane.^2+yApPlane.^2);
-                P = gpuArray(ones(size(xApPlane))); P(rApPlane>obj.apertureRadius)=0; %Aperture function (circle)
                 [imageX,imageY] = gpuArray(meshgrid(xRange,yRange));
-                [psfscX,psfscY] = gpuArray(meshgrid(obj.xPixels./obj.getWidth*2*uMax,obj.yPixels./obj.getHeight*2*vMax));
             else
-                [xApPlane,yApPlane] = (meshgrid(obj.xPixels./obj.getWidth*4*objective.getRadiusPP,obj.yPixels./obj.getWidth*4*objective.getRadiusPP));
-                rApPlane = sqrt(xApPlane.^2+yApPlane.^2);
-                P = (ones(size(xApPlane))); P(rApPlane>obj.apertureRadius)=0; %Aperture function (circle)
-                [imageX,imageY] = (meshgrid(xRange,yRange));
-                [psfscX,psfscY] = (meshgrid(obj.xPixels./obj.getWidth*2*uMax,obj.yPixels./obj.getHeight*2*vMax));
+                [imageX,imageY] = meshgrid(xRange,yRange);
             end
-        
+
             for i=1:length(obj.theta)
                 I = zeros(obj.getHeight,obj.getWidth);
-                if length(pointObject)==1
-                    rotObject = stepperMotor.rotate(pointObject,i,obj.theta); % new point object in mm loc after rotation
-                    opticZ = rotObject.getZ-obj.dofOffset; % depth of object in z relative to the objective focal plane in mm
-                    I = obj.getPSFimage(rotObject.getX,rotObject.getY,opticZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
-                else
-                    for currentPointObject = pointObject
-                        rotObject = stepperMotor.rotate(currentPointObject,i,obj.theta); % new point object in mm loc after rotation
-                        opticZ = rotObject.getZ-obj.dofOffset; % depth of object in z relative to the objective focal plane in mm
-                        psf = obj.getPSFimage(rotObject.getX,rotObject.getY,opticZ,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opCentre);
-                        I = I + psf;
+                for currentPointObject = pointObject
+                    rotObject = stepperMotor.rotate(currentPointObject,i,obj.theta); % new point object in mm loc after rotation
+                    [~,psf,xScale,yScale] = obj.AF.getPSF(obj,objective,rotObject,5,'czt');
+                    if obj.useGPU==1
+                        [psfX,psfY] = gpuArray(meshgrid(xScale,yScale));
+                        interpPSF = interp2(psfX,psfY,psf,imageX,imageY);
+                        interpPSF(isnan(interpPSF)) = 0;
+                        I = I+interpPSF;
+                    else
+                        [psfX,psfY] = meshgrid(xScale,yScale);
+                        interpPSF = interp2(psfX,psfY,psf,imageX,imageY);
+                        interpPSF(isnan(interpPSF)) = 0;
+                        I = I+interpPSF;
                     end
                 end
-                disp(sprintf('i=%.0f, z=%.5f',i,opticZ));
                 obj.setProjection(I,i);
-                if showBoolean==1
-                    imagesc(I); axis equal tight; colorbar; drawnow;
+                if nargin==5 && varargin{1}
+                    imagesc(xRange,yRange,I); xlabel('mm'); title('Binned Image Sensor'); axis equal tight; colorbar; drawnow;
                 end
                 if rem(i,round(obj.nProj/20))==0
                     disp(sprintf('Simulation Completion Percentage = %.0f%%',i/length(obj.theta)*100));
@@ -479,9 +465,16 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         % returns current object space depth of field in binned image space pixels
         %@param double n, refractive index of immersion fluid
         %@param Objective objective
-        function out = DoF(obj,objective,n)
-            DoFmm = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,n);
+        function out = DoF(obj,objective)
+            DoFmm = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
             out = DoFmm*objective.getMagnification/obj.getPixelSize;
+        end
+        
+        % returns current object space depth of field in mm
+        %@param double n, refractive index of immersion fluid
+        %@param Objective objective
+        function out = DoFinMM(obj,objective)
+            out = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
         end
         
         % returns current system object space NA
@@ -497,12 +490,6 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             out = obj.lambda/(2*objective.getEffNA(obj.apertureRadius));
         end
         
-        % returns current object space depth of field in binned image space pixels
-        % @param Objective objective
-        function out = getDoFOffset(obj,objective)
-            out = obj.dofOffset*objective.getMagnification/obj.getPixelSize;
-        end
-        
         % setup for full DoF OPT - sets the system aperture radius and
         % motor axis location
         % @param double n, refractive index of immersion fluid
@@ -513,6 +500,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;
             obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;
             stepperMotor.setZ(0);
+            obj.focalPlaneOffset = 0;
         end
         
         % setup for half DoF OPT - sets the system aperture radius and
@@ -527,7 +515,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             elseif nargin==5
                 DoF = obj.DoF(objective,n)*obj.getPixelSize/objective.getMagnification;
             end
-            obj.dofOffset = DoF/2;
+            obj.focalPlaneOffset = DoF/2;
             stepperMotor.setZ(0);
         end
     
@@ -537,44 +525,67 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
     methods
        % generates AmbiguityFunction object, and fills value using obj and objective parameters
        % @param Objective objective
-       % @param boolean varargin, display boolean, 1==display 
+       % @param boolean varargin, display boolean, true==display 
        function calculateAF(obj,objective,varargin)
             obj.AF = AmbiguityFunction();
-            if nargin==3
+            if nargin==3 && varargin{1}
                 obj.AF.generate(obj,objective,true)
             else
                 obj.AF.generate(obj,objective);
             end
        end
        
-       % calculates object space psf XZ profile for zRagne = 2*DoF
+       % calculates object space psf XZ profile to first zeros
        % @oaram Objective objective
-       function getXZpsfProfile(obj,objective)
-           if isempty(obj.AF)
-               error('Please calculate ambiguity function first');
+       % @param String limit, either 'dof' or 'zeros' - extent of z range
+       % either to 2x definition of depth of field or to the first zeros
+       % @param PointObject varargin, optional point object to probe system
+       % at objects x,y coordinates
+       function xzPSF(obj,objective,limit,varargin)
+           if nargin==3
+               object = PointObject(0,0,0);
+           elseif nargin~=4
+               error('Incorrect number of arguments');
            else
-               theta=0; numberBesselZeros = 5;
-               zLimit = 2*objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,1);  
-               zRange = linspace(-zLimit,zLimit,256);
-               for i=1:length(zRange)
-                   point = PointObject(0,0,zRange(i));
-                   [~,psfScale,~,rPSF] = obj.AF.getPSF(obj,objective,point,theta,numberBesselZeros,'czt');
-                   xzPSF(i,:) = rPSF;
-                   if rem(i,round(length(zRange)/20))==0
-                    disp(sprintf('Completion percentage: %.1f%%',i/length(zRange)*100));
-                   end
-               end
-
-               figure; imagesc(psfScale,zRange,xzPSF./max(xzPSF(:))); axis square; 
-               figure; plot(zRange,xzPSF(:,size(xzPSF,2)/2+1)./max(xzPSF(:))); drawnow;
+               object = PointObject(varargin{1}.getX,varargin{1}.getY,0);
            end
-       end
-               
-        
+           obj.calculateAF(objective);
+           numberBesselZeros = 5;
+           switch limit
+               case 'zeros'
+                   zLimit = 2*obj.getLambda/(objective.getEffNA(obj.getApertureRadius)^2);
+               case 'dof'
+                   zLimit = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,1);
+               otherwise
+                   error('Limit must be zeros or dof');
+           end
+           zRange = linspace(-zLimit,zLimit,256);
+           psfFocus = obj.AF.getPSF(obj,objective,object,numberBesselZeros,'czt');
+           [~,dispScale,rowIndex] = psfFocus.xProfile;
+           dispScale = dispScale/objective.getMagnification; %switch to object-space scale
+           for i=1:length(zRange)
+               point = PointObject(object.getX,object.getY,zRange(i));
+               psfObject = obj.AF.getPSF(obj,objective,point,numberBesselZeros,'czt');
+               sysType = class(obj);
+               if strcmp(sysType,'ConeBeamSystem')
+                   if i==1 
+                       obj.calculateApertureDisplacement(objective); 
+                   end
+                    xzPSF(i,:) = interp1(psfObject.getXScale/objective.getMagnification,psfObject.rowProfile(rowIndex),dispScale);
+               elseif strcmp(sysType,'Standard4fSystem')
+                   xzPSF(i,:) = psfObject.rowProfile(rowIndex);
+               end
+               if rem(i,round(length(zRange)/20))==0
+                disp(sprintf('xzPSF completion percentage: %.1f%%',i/length(zRange)*100));
+               end
+           end
+           figure; imagesc(dispScale,zRange,xzPSF./max(xzPSF(:))); xlabel('x (mm)'); ylabel('z (mm)'); title('Object space PSF axial profile'); axis square;
+           figure; plot(zRange,xzPSF(:,size(xzPSF,2)/2+1)./max(xzPSF(:))); 
+       end                      
     end
     
     %% Protected Methods (only accessed by super and subclasses)
-    methods (Access = protected)
+    methods (Access = public)
         %filters projections (only ram-lak functionality implemented)
         function filterProjections(obj)
             %FILTERING with x,y,z centred on object with u offset on optic axis.            

@@ -27,7 +27,7 @@ classdef AmbiguityFunction < handle
     %% generation and access DTF's
     methods
         % generates ambiguity function based on OPTsystem and objective
-        % used
+        % used, fills obj.value, obj.tau and obj.mu properties
         % @param OPTSystem optSys
         % @param Objective, objective
         % @param Boolean varargin, display boolean, true==draw new figure
@@ -65,7 +65,7 @@ classdef AmbiguityFunction < handle
                 AF(:,count) = sum(A,2);
                 count = count+1;
                 if rem(count,round(length(obj.tau)/20))==0
-                    disp(sprintf('Percentage Complete: %.0f%%',(count-1)/length(obj.tau)*100));
+                    disp(sprintf('AF Generation Percentage Complete: %.0f%%',(count-1)/length(obj.tau)*100));
                 end
             end
             
@@ -89,16 +89,17 @@ classdef AmbiguityFunction < handle
         % @return double[] rDTF, radial defocussed transfer function
         % @return double[][] DTF, 2D defocussed transfer function
         function [DTF,rDTF] = getDTF(obj,optSys,objective,point,theta,varargin)
-            x = point.getX; z = point.getZ;
+            x = point.getX; z = point.getZ; dz = optSys.getFocalPlaneOffset;
             
             [tau2D,mu2D] = meshgrid(obj.tau,obj.mu);
             optSysType = class(optSys);
             switch optSysType
                 case 'Standard4fSystem'
-                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*(z*cos(theta)-x*sin(theta));
+                    zPosition = z*cos(theta)-x*sin(theta)-dz;
+                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*zPosition;
                 case 'ConeBeamSystem'
-                    magAxial = optSys.magnifcationAtLocation(objective,z,x,theta);
-                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*magAxial/objective.getMagnification*(z*cos(theta)-x*sin(theta));
+                    magAxial = optSys.magnifcationAtLocation(objective,z-dz,x,theta);
+                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*magAxial/objective.getMagnification*(z*cos(theta)-x*sin(theta)-dz);
                 otherwise
                     error('OPT system must be either: Standard4fSystem of ConeBeamSystem class');
             end
@@ -117,26 +118,22 @@ classdef AmbiguityFunction < handle
 
         end
         
-        % get defocussed poins spread function function for OPT from AF_shift for circular pupils.
+        % get's image-space defocussed point spread function function for OPT from AF_shift for circular pupils.
         % @param PointObject point
-        % @param double theta, projection angle in radians
         % @param double numberBesselZeros, limit of PSF scale at this
         % number of bessel zeros
         % @param boolean varargin{1}, display boolean
-        % @return double[] scalePSF, scale of PSF in mm
         % @return double[][] PSF, 2D point spread function
-        % @return double[][] rampPSF, 2D point spread function with ramp
-        % filter applied in frequency space for OPT reconstructions
-        % @return double[] rPSF, radial point spread function
-        function [PSF,xPsfScale,yPsfScale,rampPSF,rPSF] = getPSF(obj,optSys,objective,point,theta,numberBesselZeros,method,varargin)  
+        % @return double[] xPsfScale, x-scale of PSF in mm
+        % @return double[] yPsfScale, y-scale of PSF in mm
+        % @return PointSpreadFunction psfObject, point spread function
+        % object
+        function [psfObject,PSF,xPsfScale,yPsfScale] = getPSF(obj,optSys,objective,point,numberBesselZeros,method,varargin)  
             if isempty(method)
                 method = 'fft';
             end
             
-            xRot = point.getX*cos(theta)-point.getZ*sin(theta);
-            zRot = point.getZ*cos(theta)+point.getX*sin(theta);
-
-            DTF = obj.getDTF(optSys,objective,point,theta,false);
+            DTF = obj.getDTF(optSys,objective,point,0,false);
             
             du = 4*objective.getEffNA(optSys.getApertureRadius)/optSys.getLambda/(size(obj.value,2)-1);
             
@@ -166,23 +163,19 @@ classdef AmbiguityFunction < handle
             optSysType = class(optSys);
             switch optSysType
                 case 'Standard4fSystem'
-                    xPsfScale = xRot+scalePSF; yPsfScale = point.getY+scalePSF;
+                    xPsfScale = (point.getX+scalePSF).*objective.getMagnification; yPsfScale = (point.getY+scalePSF).*objective.getMagnification;
                 case 'ConeBeamSystem'
-                    opCentre = optSys.getOpticCentre.*optSys.getPixelSize;
-                    magRatio = optSys.magnifcationAtLocation(objective,zRot,0,0)/objective.getMagnification;
+                    opCentre = optSys.getOpticCentre;
+                    magRatio = optSys.magnifcationAtLocation(objective,point.getZ,0,0)/objective.getMagnification;
                     PSF = PSF.*magRatio^2;
-                    xPsfScale = (xRot-opCentre(1))*magRatio+opCentre(1)+scalePSF*magRatio;
-                    yPsfScale = (point.getY-opCentre(2))*magRatio+opCentre(2)+scalePSF*magRatio;
+                    xPsfScale = ((point.getX-opCentre(1))*magRatio+opCentre(1)+scalePSF*magRatio).*objective.getMagnification;
+                    yPsfScale = ((point.getY-opCentre(2))*magRatio+opCentre(2)+scalePSF*magRatio).*objective.getMagnification;
             end
             
-            xPsfScale = -1*xPsfScale; yPsfScale = -1*yPsfScale; %to account for magnification inversion
-            
-            rPSF = PSF(:,size(PSF,2)/2+1);
-            
-            PSF = PointSpreadFunction(PSF,xPsfScale,yPsfScale);
+            psfObject = PointSpreadFunction(PSF,xPsfScale,yPsfScale);
 
-            if nargin==8 && varargin{1}
-                PSF.show;
+            if nargin==7 && varargin{1}
+                psfObject.show; title('Image-Space PSF');
             end
 
         end

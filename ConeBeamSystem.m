@@ -36,39 +36,7 @@ classdef ConeBeamSystem < OPTSystem
         end         
     end
 
-    methods  
-        % @param double x,y,z , location of point object
-        % @param Objective objective, objective class object
-        % @param double[][] imageX, imageY, image space coordinates
-        % @param double[][] psfscX,psfscY, point spread function
-        % coordinates
-        % @param double[][] P, aperture function
-        % @param double[] opticCentre, binned opticCentre [x,y] in mm from
-        % centre of FOV
-        % @param boolean varargin, display bool, true==new figure and
-        % display psf
-        function out = getPSFimage(obj,x,y,z,objective,imageX,imageY,xApPlane,yApPlane,psfscX,psfscY,P,opticCentre,varargin)
-            obj.calculateApertureDisplacement(objective);
-            mz = objective.getMagnification./(1+z*obj.apertureDisplacement/(objective.getF^2)); %Axially dependant magnfication
-            alpha = -1/(obj.getLambda*objective.getF)*(x+(imageX-opticCentre(1))./mz+opticCentre(1)/objective.getMagnification);
-            beta = -1/(obj.getLambda*objective.getF)*(y+(imageY-opticCentre(2))./mz+opticCentre(2)/objective.getMagnification);
-            k = 2*pi/obj.getLambda; %wavevector in mm^-1
-            Q = P.*exp(-1i*k/2*(z/(objective.getF^2+z*obj.apertureDisplacement)).*(xApPlane.^2+yApPlane.^2));
-            c = fftshift(fft2(Q));
-            h = c.*conj(c);  
-            h_scaled = interp2(psfscX,psfscY,h,alpha,beta,'linear');
-            %out = double(1/objective.getMagnification^4.*mz^2.*h_scaled*1/(objective.getF*obj.getLambda)^4);
-            out = h_scaled./nansum(h_scaled(:)).*(mz/objective.getMagnification)^2.*pi*objective.getEffNA(obj.getApertureRadius)^2;
-            out(isnan(out)) = 0;
-            
-            PSF = PointSpreadFunction(out,imageX(1,:)/objective.getMagnification,imageY(:,1)/objective.getMagnification);
-            disp(PSF.getFWHM);
-            
-            if nargin==14 && varargin{1}
-                figure; imagesc(imageX(1,:)/objective.getMagnification,imageY(:,1)/objective.getMagnification,out); axis square; drawnow;
-            end
-        end
-        
+    methods        
         % @param string outputPath, path to save reconstructions
         % @param double mnidx, minimum index of slices to reconstruct
         % @param double mxidx, maximum index of slices to reconstruct
@@ -80,19 +48,19 @@ classdef ConeBeamSystem < OPTSystem
             end
             %common parameters to send to reconstruction function
             [xx,zz] = meshgrid(obj.xPixels,obj.zPixels);
-            t = 2*pi-obj.theta;
+            t = obj.theta;
             if obj.getUseGPU == 1
-                xxS = gpuArray(xx+stepperMotor.getX/obj.getPixelSize*objective.getMagnification);
+                xxS = gpuArray(xx-stepperMotor.getX/obj.getPixelSize*objective.getMagnification);
                 zz = gpuArray(zz);
             else
-                xxS = xx+stepperMotor.getX/obj.getPixelSize*objective.getMagnification;
+                xxS = xx-stepperMotor.getX/obj.getPixelSize*objective.getMagnification;
             end
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
             for index=mnidx:mxidx
-                op = obj.getOpticCentre;        
+                op = obj.getOpticCentrePixels(objective);        
                 D = obj.getR;
                 for i = 1:obj.getNProj
-                    motorOffset = -stepperMotor.currentX(i)/obj.getPixelSize*objective.getMagnification;
+                    motorOffset = stepperMotor.currentX(i)/obj.getPixelSize*objective.getMagnification;
                     if obj.getUseGPU==1
                         projI = gpuArray(obj.getFilteredProj(i));
                         if i==1

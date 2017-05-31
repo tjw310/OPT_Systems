@@ -28,6 +28,18 @@ classdef PointSpreadFunction < handle
             end
             out = obj.FWHM;
         end
+        % @return double[] out, x-scale in mm
+        function out = getXScale(obj)
+            out = obj.xScale;
+        end
+        % @return double[] out, y-scale in mm
+        function out = getYScale(obj)
+            out = obj.yScale;
+        end
+        % @return double[][] out, value of psf
+        function out = getValue(obj)
+            out = obj.value;
+        end
         % @param double[][] value, value of psf
         function setValue(obj,value)
             obj.value = value;
@@ -60,6 +72,17 @@ classdef PointSpreadFunction < handle
                 error('Please calculate ramp value first');
             end
         end
+        % @param int rowIndex, gets row profile of rowIndex
+        % @return double[] out, psf row profile
+        function out = rowProfile(obj,rowIndex)
+            out = obj.value(rowIndex,:);
+        end
+         % @param int colIndex, gets column profile of rowIndex
+        % @return double[] out, psf column profile
+        function out = colProfile(obj,colIndex)
+            out = obj.value(:,colIndex);
+        end
+        
     end
     
     methods
@@ -85,6 +108,22 @@ classdef PointSpreadFunction < handle
             else
                 error('Please set PSF value before calculating ramp filter');
             end
+        end
+        % @return double[] rPSF, returns x-profile of psf
+        % @return double[] scale, scale in mm
+        % @return int row, row of profile
+        function [xPSF,scale,row] = xProfile(obj)
+            if ~isempty(obj.value)
+                [row,~] = find(obj.value == max(obj.value(:)));
+                xPSF = obj.value(row,:);
+                scale = obj.xScale;
+            else
+                error('No PSF value');
+            end
+        end
+        % @return double sum, sum of PSF
+        function out = sum(obj)
+            out = sum(obj.value(:));
         end
     end
 

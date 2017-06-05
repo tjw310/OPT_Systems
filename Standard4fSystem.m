@@ -17,11 +17,11 @@ classdef Standard4fSystem < OPTSystem
         % @param StepperMotor stepperMotor, provides AoR displacement
         % information
         % @param Objective objective, provides magnfication information
-        function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean)
+        function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,~,tStage,displayBoolean)
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
             [xShift,zShift] = meshgrid((1:obj.getWidth)+stepperMotor.getX/obj.getPixelSize*objective.getMagnification,(1:obj.getWidth)-stepperMotor.getZ/obj.getPixelSize*objective.getMagnification);
             for index = mnidx:mxidx
-                sinogram = obj.getShiftedSinogram(index,stepperMotor,objective);
+                sinogram = obj.getShiftedSinogram(index,stepperMotor,objective,tStage);
                 slice = iradon(circshift(sinogram,[-1,0]),obj.getNAngles/obj.getNProj,obj.getInterptype,obj.getFilter,1,size(sinogram,1));
                 slice = interp2(slice,xShift,zShift);
                 slice(isnan(slice)) = 0;

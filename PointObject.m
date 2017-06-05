@@ -39,7 +39,9 @@ classdef PointObject
             xIdeal = (obj.x-stepperMotor.getX).*cos(theta)-(obj.z-stepperMotor.getZ).*sin(theta)+stepperMotor.getX;
             yIdeal = repmat(obj.y,1,length(theta));
             zIdeal = (obj.x-stepperMotor.getX).*sin(theta)+(obj.z-stepperMotor.getZ).*cos(theta)+stepperMotor.getZ;
-            hold on; plot3(xIdeal,yIdeal,zIdeal,'r'); hold off;
+            hold on; plot3(xIdeal,yIdeal,zIdeal,'r'); hold off; title('xyz object space orbit of point');
+            
+            figure; subplot(2,1,1); plot(xIdeal); title('x motion (mm)'); subplot(2,1,2); plot(zIdeal); title('z motion (mm)');
             
             if ~isempty(stepperMotor.getZMotion)
                 figure; plot(1:length(theta),xC-xIdeal);

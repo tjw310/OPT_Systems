@@ -7,7 +7,7 @@ classdef ConeBeamSystem < OPTSystem
     end
     
     methods %constructor
-        function obj = ConeBeamSystem()
+        function obj = ConeBeamSystem(varargin)
             obj = obj@OPTSystem();
         end
     end
@@ -42,7 +42,11 @@ classdef ConeBeamSystem < OPTSystem
         % @param double mxidx, maximum index of slices to reconstruct
         % @param boolean displayBoolean, true if want to display
         % @param StepperMotor stepperMotor, class with rotation axis prop
-        function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,displayBoolean)
+        % @param ObjectiveStage obStage, optional objective stage for focal
+        % plane tracking, enter [] if not used
+        % @param TranslationStage tStage, optional xy translation stage,
+        % enter [] is not used
+        function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,~,tStage,displayBoolean)
             if isempty(obj.getAllFilteredProj)
                 obj.filterProjections();
             end
@@ -56,6 +60,13 @@ classdef ConeBeamSystem < OPTSystem
                 xxS = xx-stepperMotor.getX/obj.getPixelSize*objective.getMagnification;
             end
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
+            
+            if ~isempty(tStage)
+                tStageDiff = tStage.discreteDifference/obj.getPixelSize*objective.getMagnification;
+            else
+                tStageDiff = zeros(1,obj.getNProj);
+            end
+            
             for index=mnidx:mxidx
                 op = obj.getOpticCentrePixels(objective);        
                 D = obj.getR;
@@ -74,7 +85,7 @@ classdef ConeBeamSystem < OPTSystem
                     end
 
                    u = D.*(xxS*cos(t(i))+zz*sin(t(i))-op(1)+motorOffset)...
-                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset;
+                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset-tStageDiff(i);
 
                    U = (xxS*sin(t(i))-zz*cos(t(i))+D)./D;
                    v = (1./U.*(index-obj.getHeight/2-op(2)))+op(2);                       
@@ -107,14 +118,68 @@ classdef ConeBeamSystem < OPTSystem
             dlmwrite(fullfile(obj.getOutputPath,'MaxMinValues.txt'),maxMinValues,';');
         end
         
-        % calculates magnifcation at z location = zcos(beta)-xsin(beta)
+        % calculates magnifcation at z location
         % @param Objective objective
-        % @param double z, in mm
-        % @param double x, in mm
+        % @param double z, query distance away from focal plane in mm
         % @param double beta, projection angle in radians
-        function out = magnifcationAtLocation(obj,objective,z,x,beta)
-            out = objective.getMagnification/(1+obj.apertureDisplacement/objective.getF^2*(z*cos(beta)-x*sin(beta)));
+        function out = magnifcationAtDepth(obj,objective,z)
+            if isempty(obj.getApertureDisplacement)
+                obj.calculateApertureDisplacement(objective);
+            end
+            out = objective.getMagnification/(1+obj.apertureDisplacement*z/objective.getF^2);
         end
+        
+        % calculates magnification profil
+       % @oaram Objective objective
+       % @param String limit, either 'dof' or 'zeros' - extent of z range
+       % either to 2x definition of depth of field or to the first zeros or
+       % to a custom double numeric limit
+       % @param figureHandle varargin{1}, optional figure handle
+       % @param boolean varargin{2}, optional draw boolean
+       % @return double[] magRatio, magnification ratio
+       % @return double[] zRange, z-range of plot
+       % @return double zLimit, z-depth limit of plot
+       % @return figure figureHandle, handle of figure
+        function [magRatio,zRange,zLimit,figureHandle] = magRatioProfile(obj,objective,limit,varargin)
+            [figureHandle,displayBoolean] = parse_inputs(varargin{:});
+            switch limit
+               case 'zeros'
+                   zLimit = 2*obj.getLambda/(objective.getEffNA(obj.getApertureRadius)^2);
+               case 'dof'
+                   zLimit = objective.getEffDoF(obj.getPixelSize/obj.getBinFactor,obj.getLambda,obj.getApertureRadius,1);
+               otherwise
+                   if isnumeric(limit)
+                       zLimit = limit;
+                   end
+            end
+            zRange = linspace(-zLimit,zLimit,256);
+            magRatio = 1./(1+obj.apertureDisplacement.*zRange./objective.getF^2);
+            if displayBoolean
+                if isempty(figureHandle);
+                    figureHandle = figure;
+                    ax=gca(figureHandle); 
+                else
+                    ax=gca(figureHandle); hold on;
+                end 
+                plot(ax,zRange,magRatio); xlabel('z (mm)'); ylabel('Magnification Ratio');  hold off;
+                title(sprintf('Objective Magnification: %.0fx, Aperture Radius=%.2fmm',objective.getMagnification,obj.getApertureRadius));
+                axis tight square;
+            end
+            
+            %input parser
+            function [figureHandle,displayBoolean] = parse_inputs(varargin)
+                figureHandle = []; displayBoolean = false;
+                for arg = varargin{:}
+                    switch class(arg)
+                        case 'logical'
+                            displayBoolean = arg;
+                        case 'matlab.ui.Figure'
+                            figureHandle = arg;
+                    end
+                end
+            end
+        end
+        
         
     end
     

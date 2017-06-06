@@ -1,4 +1,4 @@
-classdef AmbiguityFunction < handle
+classdef AmbiguityFunctionFocalScanned < handle
     %class for the shifted ambiguity function for 2D circular pupils
     
     properties (Access = private)
@@ -9,7 +9,7 @@ classdef AmbiguityFunction < handle
     end
     
     methods %constructor and get\set
-        function obj = AmbiguityFunction()
+        function obj = AmbiguityFunctionFocalScanned()
         end
         function out = getValue(obj)
             out = obj.value;
@@ -39,7 +39,7 @@ classdef AmbiguityFunction < handle
             s_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
             t_scale = 8*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
             
-            [s,t] = meshgrid(s_scale,t_scale);
+            [t,s] = meshgrid(s_scale,t_scale);
             
             obj.tau = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
             dt = (max(t_scale)-min(t_scale))/nPx;
@@ -47,41 +47,46 @@ classdef AmbiguityFunction < handle
             obj.mu = mu_max.*(-nPx/2:nPx/2-1)/(0.5*nPx);
 
             r1 = sqrt(t.^2+s.^2);
-            Norm = zeros(size(s));
-            Norm(r1<=wMax) = 1;
-            Norm = sum(sum(Norm.^2));
+            normFactor = zeros(size(s));
+            normFactor(r1<=wMax) = 1;
+            normFactor = sum(sum(normFactor.^2)).*rho;
             count = 1;
             AF = zeros(length(t),length(obj.tau));
             OTF = zeros(1,length(obj.tau));
 
+            k=2*pi/optSys.getLambda;
+            
+
             for dt = obj.tau
-                P1 = zeros(size(s)); P2 = zeros(size(t));
+                P1 = zeros(length(obj.tau)); P2 = zeros(length(obj.tau));
                 r1 = sqrt((t+dt/2).^2+s.^2);
                 r2 = sqrt((t-dt/2).^2+s.^2);
                 P1(r1<=wMax) = 1;
                 P2(r2<=wMax) = 1;
-                A = fftshift(fft(ifftshift(P1.*P2)))./Norm;
-                OTF(count) = sum(sum(P1.*P2))./Norm;
-                AF(:,count) = sum(A,2);
+                
+                product = P1.*P2.*rho.*sinc(dt/lambda.*t*rho)./normFactor;
+                
+                OTF(count) = sum(product(:));
+                AF(:,count) = fftshift(fft(ifftshift(sum(product,1))));
                 count = count+1;
                 if rem(count,round(length(obj.tau)/20))==0
                     disp(sprintf('AF Generation Percentage Complete: %.0f%%',(count-1)/length(obj.tau)*100));
                 end
-            end
-            
+                
+            end     
             obj.value = AF;
             
             [x1,z1] = meshgrid(-size(obj.value,2)/2:size(obj.value,2)/2-1);
             obj.OTF = interp2(x1,z1,repmat(OTF,size(obj.value,2),1),sqrt((x1+0.5).^2+(z1+0.5).^2),(z1+0.5));
             obj.OTF(isnan(obj.OTF))=0;
             
-            if nargin==4 && varargin{1}
+            if nargin>1 && varargin{1}
                 figure; imagesc(obj.tau,obj.mu,real(obj.value)); 
                 %xlabel('\tau = \lambda mfw (mm)'); %alternative labels
                 %ylabel('mw/f(z2cos\theta-x2sin\theta) (mm)');
                 xlabel('tau (mm)');
                 ylabel('mu (mm)');
-             axis square; title('Real-part Ambiguity Function of Circular Pupil'); drawnow;
+                axis square; title('Real-part Modified Ambiguity Function of Circular Pupil'); drawnow;
             end
         end
         

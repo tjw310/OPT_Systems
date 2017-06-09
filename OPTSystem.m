@@ -573,6 +573,12 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             out = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
         end
         
+        
+        %returns traditional DoF definition: DoF = n*lambda/(4*NA^2)
+        function out = traditionalDoF(obj,objective)
+            out = objective.getEffTradDoF(obj.lambda,obj.apertureRadius,obj.n);
+        end
+        
         % returns current system object space NA
         %@param Objective objective
         function out = NA(obj,objective)

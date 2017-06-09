@@ -45,10 +45,8 @@ classdef Objective < handle
         end
         %get max spatial frequnecy transfer (Abbe criterion) for incoherent
         %detection
-        % @param OPTSystem optSys, sends lambda parameter
-        function out = getAbbe(obj,optSys)
-            out = 2*obj.getEffNA(optSys.getApertureRadius)/optSys.getLambda;
-        end
+        function out = getAbbe(obj)
+            out = 2*obj.NA/o
         %@param double NA, numerical aperture
         function setNA(obj,NA)
             obj.NA = NA;
@@ -92,13 +90,6 @@ classdef Objective < handle
             DoF = n*(lambda/(obj.NA)^2+pxSz/(obj.magnification*obj.NA));      
         end
         
-        %gets traditional depth of field limit: DoF = n*4*lambda/(NA^2)
-        % @param n - refractive index of immersion medium
-        % @param lambda - wavelength of light (mm)
-        function DoF = getTraditionalDoF(obj,lambda,n)
-            DoF = n*4*lambda/(obj.NA^2);
-        end
-        
         %gets approximate depth of field using effective NA
         % @param pxSz - pixel size of detector in mm
         % @param n - refractive index of immersion medium
@@ -107,15 +98,6 @@ classdef Objective < handle
         function DoF = getEffDoF(obj,pxSz,lambda,apertureRadius,n)            
             reducedNA = obj.getEffNA(apertureRadius);
             DoF = n*(lambda/(reducedNA)^2+pxSz/(obj.magnification*reducedNA));      
-        end
-        
-        %gets traditional effective depth of field limit: DoF =
-        %n*4*lambda/NA^2 for OPT system with aperture
-        % @param n - refractive index of immersion medium
-        % @param lambda - wavelength of light (mm)
-        % @param apertureRadius - radius of aperture placed in pupil plane
-        function DoF = getEffTradDoF(obj,lambda,apertureRadius,n)
-            DoF = n*4*lambda/(obj.getEffNA(apertureRadius)^2);
         end
     end
             

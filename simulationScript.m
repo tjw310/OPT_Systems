@@ -1,11 +1,11 @@
 %script to set up cone beam system with simulation 19th May 2017. T.Watson
 
-NA = 0.5; mag = 20; apertureReductionFactor = 10; lambda = 500e-6;
+NA = 0.3; mag = 10; apertureReductionFactor = 10; lambda = 500e-6;
 objective = Objective(NA,mag);
 object = PointObject(0,0,0);
 stepperMotor = StepperMotor();
-system = Standard4fSystem();
-coneSystem = ConeBeamSystem();
+%system = Standard4fSystem();
+%coneSystem = ConeBeamSystem();
 
 %%
 system.setLambda(lambda);
@@ -18,6 +18,8 @@ system.setNProj(100);
 system.setBinFactor(4);
 system.setApertureRadius(objective.getRadiusPP/apertureReductionFactor);
 system.setOpticCentre([0,0]);
+
+%%
 coneSystem.setR(10e3);
 
 coneSystem.setBinFactor(system.getBinFactor);

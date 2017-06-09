@@ -5,7 +5,7 @@ classdef AmbiguityFunctionFocalScanned < handle
         value %double[][] 2D array values
         tau %double[] scale of AF (x-direction, see T.Watson PhD Thesis) in mm
         mu %double[] scale of AF (y-direction) in mm
-        OTF %double[] double array for in-focus transfer function
+        OTF %double[][] double array for in-focus transfer function
     end
     
     methods %constructor and get\set
@@ -16,9 +16,6 @@ classdef AmbiguityFunctionFocalScanned < handle
         end
         function out = getOTF(obj)
             out = obj.OTF;
-        end
-        function out = getTau(obj)
-            out = obj.tau;
         end
         function show(obj)
             figure; imagesc(obj.tau,obj.mu,real(obj.value)); xlabel('\tau = \lambda mfw (mm)');
@@ -41,11 +38,10 @@ classdef AmbiguityFunctionFocalScanned < handle
             %calculates shifted ambiguity function (AF_shift) for circular pupils
             nPx = 256;
             wMax = objective.getNA*objective.getF;
-            rho = zRange/objective.getF^2;
+            rho = zRange/2/objective.getF^2;
             
             s_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
-            %adjusts t_scale based on z-range, and current depth of field
-            t_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx)*1/((zRange+4/objective.getRadiusPP^2)*wMax); 
+            t_scale = 4*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
             
             [s,t] = meshgrid(s_scale,t_scale);
             
@@ -60,6 +56,8 @@ classdef AmbiguityFunctionFocalScanned < handle
             normFactor = sum(sum(normFactor.^2));
             count = 1;
             AF = zeros(length(t),length(obj.tau));
+            OTF = zeros(1,length(obj.tau));
+         
              
             for dt = obj.tau
                 P1 = zeros(length(obj.tau)); P2 = zeros(length(obj.tau));
@@ -82,6 +80,8 @@ classdef AmbiguityFunctionFocalScanned < handle
                 
                 A = fftshift(fft(ifftshift(product)))./normFactor;
                 AF(:,count) = sum(A,2);
+                
+                OTF(count) = sum(product(:))./normFactor;
                   
                 count = count+1;
                 if rem(count,round(length(obj.tau)/20))==0
@@ -90,7 +90,10 @@ classdef AmbiguityFunctionFocalScanned < handle
                 
             end     
             obj.value = AF;
-            obj.OTF = AF(nPx/2+1,:);
+            
+            [x1,z1] = meshgrid(-size(obj.value,2)/2:size(obj.value,2)/2-1);
+            obj.OTF = interp2(x1,z1,repmat(OTF,size(obj.value,2),1),sqrt((x1+0.5).^2+(z1+0.5).^2),(z1+0.5));
+            obj.OTF(isnan(obj.OTF))=0;
             
             if nargin>1 && varargin{1}
                 figure; imagesc(obj.tau,obj.mu,real(obj.value)); 
@@ -98,25 +101,22 @@ classdef AmbiguityFunctionFocalScanned < handle
                 %ylabel('mw/f(z2cos\theta-x2sin\theta) (mm)');
                 xlabel('tau (mm)');
                 ylabel('mu (mm)');
-                axis square; title(strcat('Real-part Modified Ambiguity Function of Circular Pupil for ',type,' scan')); drawnow;
+                axis square; title('Real-part Modified Ambiguity Function of Circular Pupil'); drawnow;
                 
+                 x2 = x1(1,:); z2 = z1(:,1).';
                 count = 1;
                 [tau2D,mu2D] = meshgrid(obj.tau,obj.mu);
-                zQueryRange = linspace(-optSys.traditionalDoF(objective)/2,optSys.traditionalDoF(objective)/2,nPx);
-                for zPosition = zQueryRange
+                for zPosition = linspace(-
+                    zPosition = z*cos(theta)-x*sin(theta)-zOffset;
                     muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*zPosition;
                     R(count,:) = interp2(tau2D,mu2D,obj.value,obj.tau,muQuery);
                     count = count+1;
                 end
                 R(isnan(R)) = 0;
-                shiftedOTFz = real(R);
-                abbe = 2*objective.getNA/optSys.getLambda;
-                freqScale = linspace(-abbe,abbe,nPx); 
-                figure; subplot(1,3,1); plot(freqScale,real(obj.OTF)); xlabel('Spatial Frequency (mm^{-1})'); axis square; ylabel('Normalised Magnitude');
-                subplot(1,3,2); imagesc(freqScale,zQueryRange,shiftedOTFz./max(shiftedOTFz(:))); axis square; xlabel('Spatial Frequency (mm^{-1})');
-                ylabel('Depth away from focal plane (mm)');
-                subplot(1,3,3); imagesc(freqScale,zQueryRange,repmat(obj.OTF,nPx,1)./max(obj.OTF)-shiftedOTFz./max(shiftedOTFz(:))); axis square;
-                xlabel('Spatial Frequency (mm^{-1})'); ylabel('Depth away from focal plane (mm)');
+                shiftedOTFz = fftshift(real(R),1);
+                freqScale = linspace(-objective.getAbbe(optSys),objective.getAbbe(optSys),nPx);
+                figure; imagesc(freqScale,zPos,shiftedOTFz./max(shiftedOTFz(:))); axis square;
+                figure; imagesc(freqScale,zPos,repmat(OTF,nPx,1)./max(OTF)-shiftedOTFz./max(shiftedOTFz(:))); axis square; caxis([-0.5,0.5]);
             end
         end
         

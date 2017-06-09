@@ -5,7 +5,7 @@ classdef AmbiguityFunction < handle
         value %double[][] 2D array values
         tau %double[] scale of AF (x-direction, see T.Watson PhD Thesis) in mm
         mu %double[] scale of AF (y-direction) in mm
-        OTF %double[][] double array for in-focus transfer function
+        OTF %double[] double array for in-focus transfer function
     end
     
     methods %constructor and get\set
@@ -16,6 +16,9 @@ classdef AmbiguityFunction < handle
         end
         function out = getOTF(obj)
             out = obj.OTF;
+        end
+        function out = getTau(obj)
+            out = obj.tau;
         end
         function show(obj)
             figure; imagesc(obj.tau,obj.mu,real(obj.value)); xlabel('\tau = \lambda mfw (mm)');
@@ -37,7 +40,8 @@ classdef AmbiguityFunction < handle
             wMax = objective.getEffNA(optSys.getApertureRadius)*objective.getF;
            
             s_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
-            t_scale = 8*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
+            %adjusts t_scale based on z-range, and objective depth of field
+            t_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx)*2/(4/objective.getRadiusPP); 
             
             [s,t] = meshgrid(s_scale,t_scale);
             
@@ -52,7 +56,6 @@ classdef AmbiguityFunction < handle
             Norm = sum(sum(Norm.^2));
             count = 1;
             AF = zeros(length(t),length(obj.tau));
-            OTF = zeros(1,length(obj.tau));
 
             for dt = obj.tau
                 P1 = zeros(size(s)); P2 = zeros(size(t));
@@ -61,7 +64,6 @@ classdef AmbiguityFunction < handle
                 P1(r1<=wMax) = 1;
                 P2(r2<=wMax) = 1;
                 A = fftshift(fft(ifftshift(P1.*P2)))./Norm;
-                OTF(count) = sum(sum(P1.*P2))./Norm;
                 AF(:,count) = sum(A,2);
                 count = count+1;
                 if rem(count,round(length(obj.tau)/20))==0
@@ -71,9 +73,7 @@ classdef AmbiguityFunction < handle
             
             obj.value = AF;
             
-            [x1,z1] = meshgrid(-size(obj.value,2)/2:size(obj.value,2)/2-1);
-            obj.OTF = interp2(x1,z1,repmat(OTF,size(obj.value,2),1),sqrt((x1+0.5).^2+(z1+0.5).^2),(z1+0.5));
-            obj.OTF(isnan(obj.OTF))=0;
+            obj.OTF = AF(nPx/2+1,:);
             
             if nargin==4 && varargin{1}
                 figure; imagesc(obj.tau,obj.mu,real(obj.value)); 
@@ -81,7 +81,24 @@ classdef AmbiguityFunction < handle
                 %ylabel('mw/f(z2cos\theta-x2sin\theta) (mm)');
                 xlabel('tau (mm)');
                 ylabel('mu (mm)');
-             axis square; title('Real-part Ambiguity Function of Circular Pupil'); drawnow;
+                axis square; title('Real-part Ambiguity Function of Circular Pupil'); drawnow;
+             
+                count = 1;
+                [tau2D,mu2D] = meshgrid(obj.tau,obj.mu);
+                zQueryRange = linspace(-optSys.traditionalDoF(objective)/2,optSys.traditionalDoF(objective)/2,nPx);
+                for zPosition = zQueryRange
+                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*zPosition;
+                    R(count,:) = interp2(tau2D,mu2D,obj.value,obj.tau,muQuery);
+                    count = count+1;
+                end
+                R(isnan(R)) = 0;
+                shiftedOTFz = real(R);
+                freqScale = linspace(-objective.getAbbe(optSys),objective.getAbbe(optSys),nPx); 
+                figure; subplot(1,3,1); plot(freqScale,real(obj.OTF)); xlabel('Spatial Frequency (mm^{-1})'); axis square; ylabel('Normalised Magnitude');
+                subplot(1,3,2); imagesc(freqScale,zQueryRange,shiftedOTFz./max(shiftedOTFz(:))); axis square; xlabel('Spatial Frequency (mm^{-1})');
+                ylabel('Depth away from focal plane (mm)');
+                subplot(1,3,3); imagesc(freqScale,zQueryRange,repmat(obj.OTF,nPx,1)./max(obj.OTF)-shiftedOTFz./max(shiftedOTFz(:))); axis square;
+                xlabel('Spatial Frequency (mm^{-1})'); ylabel('Depth away from focal plane (mm)');
             end
         end
         

@@ -7,7 +7,7 @@ classdef ConeBeamSystem < OPTSystem
     end
     
     methods %constructor
-        function obj = ConeBeamSystem(varargin)
+        function obj = ConeBeamSystem()
             obj = obj@OPTSystem();
         end
     end
@@ -20,7 +20,7 @@ classdef ConeBeamSystem < OPTSystem
         function out = getR(obj)
             out = obj.R/obj.getBinFactor;
         end
-        %@param double R, effective source-detector distance in pixels
+        %@param double R, effective source-detector distance in unbinned pixels
         function setR(obj,R)
             obj.R = R;
         end

@@ -73,37 +73,12 @@ classdef TranslationStage < handle
         end
         
         % @param int projectionNumber, projection number
-        % @param OPTSystem optSys
-        % @return double out, x-position of tStage in image-space pixels
-        function out = getMotionPixels(obj,projectionNumber,optSys)
+        % @return double out, x-position of tStage in pixels
+        function out = getMotionAtProj(obj,projectionNumber)
             if isempty(obj.motion)
                 out = 0;
             else
-                x = obj.motion(1,projectionNumber)./optSys.getPixelSize*obj.magAoR;
-                y = obj.motion(2,projectionNumber)./optSys.getPixelSize*obj.magAoR;
-                theta = obj.angle;
-                xR = x.*cos(theta)-y.*sin(theta);
-                yR = x.*sin(theta)+y.*cos(theta);
-                out = [xR;yR];              
-            end
-        end
-        
-        % @param int projectionNumber, projection number
-        % @param OPTSystem optSys
-        % @return double out, x-position of tStage in image-space pixels
-        function out = getAllMotionPixels(obj,optSys)
-            if isempty(obj.motion)
-                out = 0;
-            else
-                x = obj.motion(1,:)./optSys.getPixelSize*obj.magAoR;
-                y = obj.motion(2,:)./optSys.getPixelSize*obj.magAoR;
-                theta = obj.angle;
-                xR = x.*cos(theta)-y.*sin(theta);
-                yR = x.*sin(theta)+y.*cos(theta);
-                out = [xR;yR];
-                figure; subplot(1,2,1); plot(x); subplot(1,2,2); plot(y);
-                figure; subplot(1,2,1); plot(xR-x)
-                subplot(1,2,2); plot(yR-y);
+                out = obj.motion(projectionNumber);
             end
         end
          

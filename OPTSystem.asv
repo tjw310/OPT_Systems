@@ -132,12 +132,6 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                     obj.height = size(obj.projections,1);
             end
         end
-        % @param double[][] data, projection data to input
-        % @param int index, index of projection
-        function setProjection(obj,data,index)
-            obj.projections(:,:,index) = data;
-        end
-        % @param varargin, [] uigetdir, else path directory
         function setPath(obj,varargin)
             if nargin==2
                 obj.path = varargin{1};
@@ -259,7 +253,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             for i=1:obj.nProj
                 if i==1
                     im = single(imread(strcat(fullfile(obj.path,char(cellstr(im_dir(i).name))))));
-                    im_sz = size(im)
+                    im_sz = size(im);
                     obj.projections = single(zeros(im_sz(1),im_sz(2),obj.nProj));
                 else
                     im = single(imread(strcat(fullfile(obj.path,char(cellstr(im_dir(i).name))))));
@@ -319,18 +313,9 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.binFactor = binFactor;                   
         end
         
-        % shifts single projection to the nearest pixel by vector T
         % @param double[2x1] T, translation vector in binned pixels
         % @param int index, index of projection to translate
-        function out = translateProjection(obj,T,index)
-            if index<1 || index>size(obj.projections,3)
-                error('Index Invalid');
-            else
-                p = obj.projections(:,:,index);
-                out = circshift(p,round(T.'));
-            end
-        end
-                
+        function translateProjection(obj,T,index)
             
         
         %display maximum intensity projection of projections
@@ -340,7 +325,12 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             end
             figure; imagesc(obj.xPixels*obj.getPixelSize,obj.yPixels*obj.getPixelSize,obj.MIP); 
             title('Projections Maximum Intensity Projection'); xlabel('mm'); axis equal tight;
-        end     
+        end
+        
+        %sets single projection using simulation functionality
+        function setProjection(obj,projection,index)
+            obj.projections(:,:,index) = projection;
+        end
         
         %sets projeciton parameter of size array with value
         %@param double[] size, size of projection array

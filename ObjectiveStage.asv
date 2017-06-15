@@ -37,11 +37,6 @@ classdef ObjectiveStage < handle
             figure; plot(obj.motion);
         end
         
-        % @param double[] motion, 1D array of motion
-        function setMotion(obj,motion)
-            obj.motion = motion;
-        end
-        
         % fills motion with array of z-values for sinusoidal motion around
         % centre of OPTSystem volume
         % @param OPTSystem optSys, theta values

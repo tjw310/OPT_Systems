@@ -13,7 +13,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         pxSz = 6.5e-3 %size of sensor pixels in mm (6.5e-3 by default)
         lambda = 500e-6; %wavelength in mm
         apertureRadius %radius of aperture stop in mm
-        focalPlaneOffset % focal plane z-offset from motor axis in mm
+        focalPlaneOffset = 0 % focal plane z-offset from motor axis in mm
         n = 1; %refractive index of immersion medium, default air=1
         
         % Large Data
@@ -21,7 +21,8 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         filteredProj = [] % filtered projections
         MIP = [] %maximum intensity projection through all projection angles
         
-        % Computational Parameteres
+        % Computational Parameteres        
+        rotatedBool=0 % boolean idenifying if the projections have been rotated from their raw value
         filter = 'ram-lak'; %filter used in reconstruction (Ram-Lak default)
         useGPU = 0; %boolean: true -> use CUDA enabled GPU
         interptype = 'linear'; %interpolateion type, set linear default
@@ -232,6 +233,12 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         function out = getFocalPlaneOffset(obj)
             out = obj.focalPlaneOffset;
         end
+        function setRotBool(obj,bool)
+            obj.rotatedBool = bool;
+        end
+        function out = getRotBool(obj)
+            out = obj.rotatedBool;
+        end
         
     end
     
@@ -322,22 +329,53 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         % shifts single projection to the nearest pixel by vector T
         % @param double[2x1] T, translation vector in binned pixels
         % @param int index, index of projection to translate
-        function out = translateProjection(obj,T,index)
+        function out = translateProjection(obj,T,index,type,varargin)
             if index<1 || index>size(obj.projections,3)
                 error('Index Invalid');
             else
                 p = obj.projections(:,:,index);
-                out = circshift(p,round(T.'));
+                switch type
+                    case 'circ'
+                        out = circshift(p,round(T.'));
+                    case 'crop'             
+                        out = zeros(size(p,1)+2*abs(T(1)),size(p,2)+2*abs(T(2)));
+                        rI = abs(T(1))+T(1)+1;
+                        cI = abs(T(2))+T(2)+1;
+                        rowIdxs = rI:rI+size(p,1)-1;
+                        colIdxs = cI:cI+size(p,2)-1;
+                        out(rowIdxs,colIdxs) = p;
+                        out = out(rI-T(1):rI-T(1)+size(p,1)-1,cI-T(2):cI-T(2)+size(p,2)-1);
+                    case 'extend'
+                        if nargin~=5
+                            error('Please enter output size');
+                        else
+                            outsize = varargin{1};
+                            if ~and(outsize(1)>=size(p,1)+2*abs(T(1)),outsize(2)>=size(p,2)+2*abs(T(2)))
+                                error('Output size must be larger than input+translation');
+                            end
+                            if rem(outsize(1),2)~=0
+                                outsize(1) = outsize(1)+1;
+                            end
+                            if rem(outsize(2),2)~=0
+                                outsize(2)=outsize(2)+1;
+                            end
+                            out = zeros(outsize(1),outsize(2));
+                            rI = (outsize(1)-size(p,1))/2+T(1)+1;
+                            cI = (outsize(2)-size(p,2))/2+T(2)+1;
+                            rowIdxs = rI:rI+size(p,1)-1;
+                            colIdxs = cI:cI+size(p,2)-1;
+                            out(rowIdxs,colIdxs) = p;
+                        end
+                end
             end
-        end
-                
-            
+        end    
         
         %display maximum intensity projection of projections
-        function getMIP(obj)
+        function out = getMIP(obj)
             if isempty(obj.MIP)
                 obj.MIP = max(obj.projections,[],3);
             end
+            out = obj.MIP;
             figure; imagesc(obj.xPixels*obj.getPixelSize,obj.yPixels*obj.getPixelSize,obj.MIP); 
             title('Projections Maximum Intensity Projection'); xlabel('mm'); axis equal tight;
         end     
@@ -359,6 +397,14 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.projections = [];
             obj.filteredProj = [];
             obj.MIP = [];
+        end
+        
+        %replaces projections with new array
+        % @param double[][][nProj] newProjections, 3D array of projection
+        % data
+        function replaceProjections(obj,newProjections)
+            obj.clearProjections;
+            obj.projections = newProjections;
         end
         
         % @param double mnidx, minimum slice number index
@@ -475,25 +521,29 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             yRange = obj.yPixels.*obj.getPixelSize; % image space real y coords in mm
             
             if obj.useGPU==1
-                [imageX,imageY] = gpuArray(meshgrid(xRange,yRange));
+                [imageX,imageY] = meshgrid(gpuArray(xRange),gpuArray(yRange));
             else
                 [imageX,imageY] = meshgrid(xRange,yRange);
             end
-
+            if isempty(obj.focalPlaneOffset)
+                obj.focalPlaneOffset=0;
+            end
+                        
             for i=1:length(obj.theta)
                 I = zeros(obj.getHeight,obj.getWidth);
                 for currentPointObject = pointObject
                     rotObject = stepperMotor.rotate(currentPointObject,i,obj.theta); % new point object in mm loc after rotation
-                    if ~isempty(obStage) 
-                        zOffset = obj.getFocalPlaneOffset+obStage.getMotionAtProj(i);
+                    if ~isempty(obStage)
+                        zOffset = obj.getFocalPlaneOffset+obStage.getMotionAtProj(i)-mean(obStage.getMotion);
                     else
                         zOffset = obj.getFocalPlaneOffset;
                     end
                     [~,psf,xScale,yScale] = obj.AF.getPSF(obj,objective,rotObject,5,zOffset,'czt');
                     if obj.useGPU==1
-                        [psfX,psfY] = gpuArray(meshgrid(xScale,yScale));
+                        [psfX,psfY] = meshgrid(gpuArray(xScale),gpuArray(yScale));
                         if ~isempty(tStage)
-                            interpPSF = interp2(psfX,psfY,psf,imageX+tStage.getMotionAtProj(i)*objective.getMagnification,imageY);
+                            tMotion = tStage.getMotionPixels(i,obj)/obj.getPixelSize*objective.getMagnification;
+                            interpPSF = interp2(psfX,psfY,psf,imageX+tMotion(1),imageY+tMotion(2));
                         else
                             interpPSF = interp2(psfX,psfY,psf,imageX,imageY);
                         end
@@ -503,7 +553,8 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                     else
                         [psfX,psfY] = meshgrid(xScale,yScale);
                         if ~isempty(tStage)
-                            interpPSF = interp2(psfX,psfY,psf,imageX+tStage.getMotionAtProj(i)*objective.getMagnification,imageY);
+                            tMotion = tStage.getMotionPixels(i,obj)/obj.getPixelSize*objective.getMagnification;
+                            interpPSF = interp2(psfX,psfY,psf,imageX+tMotion(1),imageY+tMotion(2));
                         else
                             interpPSF = interp2(psfX,psfY,psf,imageX,imageY);
                         end
@@ -512,12 +563,18 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                         I = I+interpPSF;
                     end
                 end
+                if obj.useGPU
+                    I = gather(I);
+                end
                 obj.setProjection(I,i);
+                displayBoolean=1;
                 if displayBoolean
                     if i==1
                         h=figure;
                     end
-                    imagesc(h,xRange,yRange,I); xlabel('mm'); title('Binned Image Sensor'); axis equal tight; colorbar; drawnow;
+                    %imagesc(h,xRange,yRange,I); 
+                    imagesc(I);
+                    xlabel('mm'); title('Binned Image Sensor'); axis equal tight; colorbar; drawnow;
                 end
                 if rem(i,round(obj.nProj/20))==0
                     disp(sprintf('Simulation Completion Percentage = %.0f%%',i/length(obj.theta)*100));

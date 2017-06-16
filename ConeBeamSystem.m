@@ -62,9 +62,9 @@ classdef ConeBeamSystem < OPTSystem
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
             
             if ~isempty(tStage)
-                tStageDiff = tStage.discreteDifference/obj.getPixelSize*objective.getMagnification;
+                tStageDiff = tStage.getDiscreteDifferencePixels(projectionNumber,obj,objective);
             else
-                tStageDiff = zeros(1,obj.getNProj);
+                tStageDiff = zeros(2,obj.getNProj);
             end
             
             for index=mnidx:mxidx
@@ -85,10 +85,10 @@ classdef ConeBeamSystem < OPTSystem
                     end
 
                    u = D.*(xxS*cos(t(i))+zz*sin(t(i))-op(1)+motorOffset)...
-                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset-tStageDiff(i);
+                       ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset-tStageDiff(1,i);
 
                    U = (xxS*sin(t(i))-zz*cos(t(i))+D)./D;
-                   v = (1./U.*(index-obj.getHeight/2-op(2)))+op(2);                       
+                   v = (1./U.*(index-tStageDiff(2,i)-obj.getHeight/2-op(2)))+op(2);                       
 
                     u2 = u-xxS(1,1)+1;
                     v2 = v-zz(1,1)+1;

@@ -119,7 +119,7 @@ classdef AmbiguityFunction < handle
                 case 'Standard4fSystem'
                     zPosition = z*cos(theta)-x*sin(theta)-zOffset;
                     muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*zPosition;
-                case 'ConeBeamSystem'
+                case {'ConeBeamSystem','SubVolumeSystem'}
                     zPosition = z*cos(theta)-x*sin(theta)-zOffset;
                     magAxial = optSys.magnifcationAtDepth(objective,zPosition);
                     muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*magAxial/objective.getMagnification*zPosition;
@@ -176,10 +176,11 @@ classdef AmbiguityFunction < handle
                     x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/objective.getEffNA(optSys.getApertureRadius)/2; %chirp z max frequency
                     m = 256;
                     psf = AmbiguityFunction.iczt_TW(DTF,du,x_ft_max,m);
-                    inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
-                    inFocusPSF(inFocusPSF<0)=inFocusPSF(inFocusPSF<0).*-1;
+                    %inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
+                    %inFocusPSF(inFocusPSF<0)=inFocusPSF(inFocusPSF<0).*-1;
                     psf(psf<0)=psf(psf<0).*-1;
-                    PSF = real(psf)./sum(real(inFocusPSF(:)));
+                    %PSF = real(psf)./sum(real(inFocusPSF(:)));
+                    PSF = real(psf);
                     scalePSF = (-1:2/m:1-2/m).*x_ft_max;
                 otherwise
                     error('Method must be either fft or czt');
@@ -189,13 +190,16 @@ classdef AmbiguityFunction < handle
             switch optSysType
                 case 'Standard4fSystem'
                     xPsfScale = (point.getX+scalePSF).*objective.getMagnification; yPsfScale = (point.getY+scalePSF).*objective.getMagnification;
-                case 'ConeBeamSystem'
+                case {'ConeBeamSystem','SubVolumeSystem'}
                     opCentre = optSys.getOpticCentre;
                     magRatio = optSys.magnifcationAtDepth(objective,point.getZ-zOffset)/objective.getMagnification;
                     %PSF = PSF.*magRatio^2;
                     xPsfScale = ((point.getX-opCentre(1))*magRatio+opCentre(1)+scalePSF*magRatio).*objective.getMagnification;
                     yPsfScale = ((point.getY-opCentre(2))*magRatio+opCentre(2)+scalePSF*magRatio).*objective.getMagnification;
+                otherwise
+                    error('Incorrect system type');
             end
+           
             
             psfObject = PointSpreadFunction(PSF,xPsfScale,yPsfScale);
 

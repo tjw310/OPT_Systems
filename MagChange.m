@@ -11,10 +11,11 @@ classdef MagChange
     
     methods
         % CONSTRUCTOR
-        function obj = MagChange(deltaMag,z1,z2)
+        function obj = MagChange(deltaMag,z1,z2,path)
             obj.deltaMag = deltaMag;
             obj.z1 = z1;
             obj.z2 = z2;
+            obj.path = path;
         end
     end
     

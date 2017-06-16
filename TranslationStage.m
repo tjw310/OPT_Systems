@@ -74,6 +74,36 @@ classdef TranslationStage < handle
         
         % @param int projectionNumber, projection number
         % @param OPTSystem optSys
+        % @return double out, difference betweeen discrete and continuous motion position of tStage in image-space pixels
+        function out = getDiscreteDifferencePixels(obj,projectionNumber,optSys,objective)
+            if isempty(obj.motion)
+                out = 0;
+            else
+                if isempty(obj.magAoR)
+                    mag = objective.getMagnification;
+                else
+                    mag = obj.magAoR;
+                end
+                x = (obj.motion(1,projectionNumber)-obj.fullMotion(1,projectionNumber))./optSys.getPixelSize*mag;
+                y = obj.motion(2,projectionNumber)./optSys.getPixelSize*mag;
+                 if ~isempty(obj.angle)
+                    theta = obj.angle;
+                    xR = x.*cos(theta)-y.*sin(theta);
+                    yR = x.*sin(theta)+y.*cos(theta);
+                    if optSys.getRotBool==1
+                        beta = -optSys.stepperMotor.getAngle;
+                        xR = xR.*cos(beta)-yR.*sin(beta);
+                        yR = xR.*sin(beta)+yR.*cos(beta);
+                    end
+                    out = [xR;yR];   
+                else
+                    out = [x;y];
+                end             
+            end
+        end
+        
+        % @param int projectionNumber, projection number
+        % @param OPTSystem optSys
         % @return double out, x-position of tStage in image-space pixels
         function out = getMotionPixels(obj,projectionNumber,optSys)
             if isempty(obj.motion)
@@ -81,17 +111,26 @@ classdef TranslationStage < handle
             else
                 x = obj.motion(1,projectionNumber)./optSys.getPixelSize*obj.magAoR;
                 y = obj.motion(2,projectionNumber)./optSys.getPixelSize*obj.magAoR;
-                theta = obj.angle;
-                xR = x.*cos(theta)-y.*sin(theta);
-                yR = x.*sin(theta)+y.*cos(theta);
-                out = [xR;yR];              
+                if ~isempty(obj.angle)
+                    theta = obj.angle;
+                    xR = x.*cos(theta)-y.*sin(theta);
+                    yR = x.*sin(theta)+y.*cos(theta);
+                    if optSys.getRotBool==1
+                        beta = -optSys.stepperMotor.getAngle;
+                        xR = xR.*cos(beta)-yR.*sin(beta);
+                        yR = xR.*sin(beta)+yR.*cos(beta);
+                    end
+                    out = [xR;yR];   
+                else
+                    out = [x;y];
+                end
             end
         end
         
         % @param int projectionNumber, projection number
         % @param OPTSystem optSys
         % @return double out, x-position of tStage in image-space pixels
-        function out = getAllMotionPixels(obj,optSys)
+        function out = getAllMotionPixels(obj,optSys,drawBoolean)
             if isempty(obj.motion)
                 out = 0;
             else
@@ -100,12 +139,20 @@ classdef TranslationStage < handle
                 theta = obj.angle;
                 xR = x.*cos(theta)-y.*sin(theta);
                 yR = x.*sin(theta)+y.*cos(theta);
+                if optSys.getRotBool==1
+                    beta = -optSys.stepperMotor.getAngle;
+                    xR = xR.*cos(beta)-yR.*sin(beta);
+                    yR = xR.*sin(beta)+yR.*cos(beta);
+                end
                 out = [xR;yR];
-                figure; subplot(1,2,1); plot(x); subplot(1,2,2); plot(y);
-                figure; subplot(1,2,1); plot(xR-x)
-                subplot(1,2,2); plot(yR-y);
+                if drawBoolean==1
+                    figure; subplot(1,2,1); plot(xR); subplot(1,2,2); plot(yR);
+                    figure; subplot(1,2,1); plot(xR-x)
+                    subplot(1,2,2); plot(yR-y);
+                end
             end
         end
+        
          
         %% PLOT
         function plotMotion(obj)

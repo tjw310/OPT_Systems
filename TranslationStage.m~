@@ -9,8 +9,7 @@ classdef TranslationStage < handle
         magAoR %magnification of movements at the axis of rotation. i.e dx(pixels)=dx(mm)*optSystem.PixelSize/TranslationStage.magAoR;
         motionAngle %angle of motion in radians, motion should be linear at an angle
         
-        motionPixels %double [1x2][] discrete stage motion in image-space binned pixels
-        fullMotionPixels %double [1x2][] continuous stage motion in image-space binned pixels
+        motionPixels %double [1x2][] stage motion in image-space binned pixels
     end
     
     methods 
@@ -80,21 +79,18 @@ classdef TranslationStage < handle
         
         % @param int projectionNumber, projection number
         % @param OPTSystem optSys
-        % @return double out, difference betweeen discrete and continuous
-        % motion position of tStage in image-space pixels for X. outputs
-        % full discrete y-motion
-        function out = getDiscreteDifferencePixels(obj,optSys)
-             [discrete,full] = getAllMotionPixels(obj,optSys);
-             out(1,:) = discrete(1,:)-full(1,:);
-             out(2,:) = discrete(2,:)-mean(full(2,:));
+        % @return double out, difference betweeen discrete and continuous motion position of tStage in image-space pixels
+        function out = getDiscreteDifferencePixels(obj,optSys,objective)
+             [discrete,full] = getAllMotionPixels(obj,optSys,objective);
+             out = discrete-full;
         end
         
         % @param int projectionNumber, projection number
         % @param OPTSystem optSys
         % @return double out, x-position of tStage in image-space pixels
-        function out = getMotionPixels(obj,projectionNumber,optSys)
+        function out = getMotionPixels(obj,projectionNumber,optSys,objective)
             if isempty(obj.motionPixels)
-                allDiscreteMotion = obj.getAllMotionPixels(optSys);
+                allDiscreteMotion = obj.getAllMotionPixels(optSys,objective);
             else
                 allDiscreteMotion = obj.motionPixels;
             end
@@ -109,32 +105,27 @@ classdef TranslationStage < handle
                 error('please set motion of translation stage');
             else
                 if isempty(obj.magAoR)
-                    mag = optSys.objective.getMagnification;
+                    mag = obj.objective.getMagnification;
                 else
                     mag = obj.magAoR;
                 end
                 fullMotion = obj.fullMotion;
-                av = repmat(mean(fullMotion,2),1,size(fullMotion,2));
-                fullMotion = fullMotion-av;
-                step = obj.stepSize;
                 if ~isempty(obj.angle)
                     theta = obj.angle;
                     fullMotion = TranslationStage.rotateXYvector(fullMotion,theta);
-                    step = TranslationStage.rotateXYvector(step,theta);
+                    step = TranslationStage.rotateXYvector(obj.stepSize,theta);
+                else
+                    step = obj.stepSize;
                 end
                 if optSys.getRotBool==1%!?!?!?!?
                     disp('test');
                     beta = optSys.stepperMotor.getAngle;
                     fullMotion = TranslationStage.rotateXYvector(fullMotion,beta);
-                    av = TranslationStage.rotateXYvector(av,beta);
                     step = TranslationStage.rotateXYvector(step,beta);
                 end
-                
-                
-                full = (fullMotion+av)/optSys.getPixelSize*mag;
-                discrete = TranslationStage.discretise(fullMotion+av,step)/optSys.getPixelSize*mag;
+                full = fullMotion/optSys.getPixelSize*mag;
+                discrete = TranslationStage.discretise(fullMotion,step)/optSys.getPixelSize*mag;
                 obj.motionPixels = discrete;
-                obj.fullMotionPixels = full;
             end
         end
         
@@ -162,19 +153,8 @@ classdef TranslationStage < handle
         
         function plotMotionPixels(obj)
             if ~isempty(obj.motionPixels)
-                 figure; 
-            for k=1:size(obj.motionPixels,1)
-                subplot(1,size(obj.motionPixels,1),k)
-                plot(obj.motionPixels(k,:)); hold on; plot(obj.fullMotionPixels(k,:)); hold off; 
-                xlabel('Projection Number');
-                ylabel('Distance (pixels)'); axis square;
-                switch k
-                    case 1
-                        title('x Motion');
-                    case 2
-                        title('y Motion');
-                end
-            end
+                figure; subplot(1,2,1); plot(obj.motionPixels(1,:)); axis square; title('x Motion'); xlabel('Projection Number');
+                subplot(1,2,2); plot(obj.motionPixels(2,:)); axis square; title('y Motion'); xlabel('Projection Number');
             end
         end
         
@@ -197,8 +177,7 @@ classdef TranslationStage < handle
         % @param OPTSystem optSys
         % @param StepperMotor stepperMotortStattasdfewasefsd ds 
         % @param PointObject point
-        function trackPoint(obj,optSys,point,varargin)
-            stepperMotor = optSys.stepperMotor;
+        function trackPoint(obj,optSys,stepperMotor,point,varargin)
             obj.motionPixels = [];
             obj.fullMotion = zeros(2,optSys.getNProj);
             obj.motion = zeros(2,optSys.getNProj);
@@ -212,21 +191,19 @@ classdef TranslationStage < handle
                 obj.fullMotion(1,:) = x; obj.fullMotion(2,:) = y;
             end
             
-            if ~isempty(obj.stepSize) || nargin==4
-                if nargin==4
+            if ~isempty(obj.stepSize) || nargin==5
+                if nargin==5
                     obj.stepSize(1)=varargin{1}*cos(stepperMotor.getAngle);
                     obj.stepSize(2)=varargin{1}*sin(-stepperMotor.getAngle);
                     if ~isempty(obj.angle) && obj.angle~=0;
                         disp('test');
-                        stepSz = TranslationStage.rotateXYvector(obj.stepSize,-obj.angle);
+                        step = TranslationStage.rotateXYvector(obj.stepSize,-obj.angle);
                     else
-                        stepSz = obj.stepSize;
+                        step = obj.stepSize;
                     end
-                else
-                    stepSz = obj.stepSize;
                 end
-                out = TranslationStage.discretise(obj.fullMotion,stepSz);
-                obj.stepSize = stepSz;
+                out = TranslationStage.discretise(obj.fullMotion,step);
+                obj.stepSize = step;
                 obj.motion = out;
             else
                 obj.motion = obj.fullMotion;

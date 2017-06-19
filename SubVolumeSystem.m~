@@ -6,6 +6,7 @@ classdef SubVolumeSystem < ConeBeamSystem
     properties
         translationStage % TranslationStage class object
         objectiveStage % ObjectiveStage class object
+        stepperMotor % Stepper Motor class object
     end
     
     properties (Access=private)
@@ -43,7 +44,25 @@ classdef SubVolumeSystem < ConeBeamSystem
             end
         end
         
-        %GET/SET METHODS  
+        %GET/SET METHODS
+        function out = getTransStage(obj)
+            out = obj.translationStage;
+        end
+        function out = getObjectiveStage(obj)
+            out = obj.objectiveStage;
+        end
+        % @param TranslationStage tStage, translation stage class object
+        function setTransStage(obj,tStage)
+            obj.translationStage = tStage;
+        end
+        % @param ObjectiveStage obStage, objective stage class object
+        function setObjectiveStage(obj,obStage)
+            obj.objectiveStage = obStage;
+        end
+        
+        function setStepperMotor(obj,stepMot)
+            obj.stepperMotor = ste
+        
         function setObjectiveR(obj,R)
             obj.objectiveR = R;
         end
@@ -129,11 +148,11 @@ classdef SubVolumeSystem < ConeBeamSystem
                     error('Please assign angle to stepper motor. (run obj.findAoRAngle)');
                 end
             end
-            rotationAngle = -obj.stepperMotor.getAngle;
+            rotationAngle = obj.stepperMotor.getAngle;
             p = obj.getProjection(1);
-            [xx,yy] = meshgrid(obj.xPixels,obj.yPixels);
-            xxR = xx.*cos(rotationAngle)-yy.*sin(rotationAngle)-xx(1,1)+1;
-            yyR = yy.*cos(rotationAngle)+xx.*sin(rotationAngle)-yy(1,1)+1;
+            [xx,yy]= meshgrid(1:size(p,2),1:size(p,1));
+            xxR = xx.*cos(rotationAngle)-yy.*sin(rotationAngle);
+            yyR = yy.*cos(rotationAngle)+xx.*sin(rotationAngle);
             projArray = single(zeros(size(obj.getAllProjections)));
             switch obj.getUseGPU
                 case 0
@@ -144,8 +163,6 @@ classdef SubVolumeSystem < ConeBeamSystem
                         if rem(idx,obj.getNProj/25)==0
                             disp(sprintf('rotation completion: %.0f%%',idx/obj.getNProj*100));
                         end
-                        subplot(1,2,1); imagesc(obj.getProjection(idx)); axis square;
-                        subplot(1,2,2); imagesc(p); axis square; drawnow;
                     end
                 case 1
                     xxR=gpuArray(xxR); yyR = gpuArray(yyR);
@@ -160,7 +177,7 @@ classdef SubVolumeSystem < ConeBeamSystem
                         end
                     end
             end
-            obj.setRotBool(1);
+            obj.setRotBool = 1;
             obj.replaceProjections(projArray);
         end
         

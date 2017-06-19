@@ -117,6 +117,48 @@ classdef Objective < handle
         function DoF = getEffTradDoF(obj,lambda,apertureRadius,n)
             DoF = n*4*lambda/(obj.getEffNA(apertureRadius)^2);
         end
+        
+        %gets maximum focal displacement when using a tunable lens in a
+        %relay system
+        % @param double maxPower, max ETL optical power = 1/f (f in mm)
+        % @oaram double minPower, min ETL optical power
+        % @param double relayLensFocalLength, focal length of primary relay
+        % lens in mm
+        function out = MFD(obj,maxPower,minPower,relayLensFocalLength)
+            out = abs((relayLensFocalLength/obj.magnification)^2*(maxPower-minPower));
+        end
+        
+        %gets maximum focal displacement when using a tunable lens in a
+        %non telecentric (cone) OPT system
+        % @param double maxPower, max ETL optical power = 1/f (f in mm)
+        % @oaram double minPower, min ETL optical power
+        % @param double apertureDisplacement
+        function out = coneMFD(obj,maxPower,minPower,apertureDisplacement)
+            d = apertureDisplacement;
+            out = abs(obj.getF^2*(maxPower-minPower)./((1+d*maxPower)*(1+d*minPower)));
+        end
+        
+        %plots MFD ratio for cone vs standard OPT systems
+        % @param double maxPower, max ETL optical power = 1/f (f in mm)
+        % @oaram double minPower, min ETL optical power
+        % @param double relayLensFocalLength, focal length of primary relay
+        % lens in mm
+        % @param double radiusETL, radius of ETL
+        % @param double[] apertureDisplacementRange, range of aperture
+        % displacements to plot
+        % @return double[] coneMFD
+        % @return double perfectStandardMFD
+        % @return double realisticStandardMFD
+        function [coneMFD,perfectStandardMFD,realisticStandardMFD] = plotMFDRatio(obj,maxPower,minPower,relayLensFocalLength,radiusETL,apertureDisplacementRange,varargin)
+            perfectStandardSystemFocalLength = radiusETL/obj.radiusPP*180;
+            perfectStandardMFD = obj.MFD(maxPower,minPower,perfectStandardSystemFocalLength);
+            realisticStandardMFD = obj.MFD(maxPower,minPower,relayLensFocalLength);
+            coneMFD = abs(obj.getF^2*(maxPower-minPower)./((1+apertureDisplacementRange*maxPower).*(1+apertureDisplacementRange*minPower)));
+            figure;
+            subplot(1,2,1); hold on; plot(apertureDisplacementRange,(coneMFD./perfectStandardMFD)); hold off; axis square;
+            subplot(1,2,2); hold on; plot(apertureDisplacementRange,(coneMFD./realisticStandardMFD)); hold off;axis square;
+
+        end
     end
             
 end

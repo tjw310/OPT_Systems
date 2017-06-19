@@ -193,13 +193,12 @@ classdef AmbiguityFunction < handle
                 case {'ConeBeamSystem','SubVolumeSystem'}
                     opCentre = optSys.getOpticCentre;
                     magRatio = optSys.magnifcationAtDepth(objective,point.getZ-zOffset)/objective.getMagnification;
-                    %PSF = PSF.*magRatio^2;
+                    PSF = PSF.*magRatio^2;
                     xPsfScale = ((point.getX-opCentre(1))*magRatio+opCentre(1)+scalePSF*magRatio).*objective.getMagnification;
                     yPsfScale = ((point.getY-opCentre(2))*magRatio+opCentre(2)+scalePSF*magRatio).*objective.getMagnification;
                 otherwise
                     error('Incorrect system type');
             end
-           
             
             psfObject = PointSpreadFunction(PSF,xPsfScale,yPsfScale);
 

@@ -143,23 +143,6 @@ classdef StepperMotor < handle
              Rxz = PointObject.Rxz(theta(projectionNumber));
              rotCoords = (inv(Rxy))*T*Rxz*(inv(T))*Rxy*object.vectorXYZ;
              rotatedObject = PointObject(rotCoords(1),rotCoords(2),rotCoords(3));
-             x = rotCoords(1); y = rotCoords(2); z = rotCoords(3);
-        end
-        
-        % rotates a pointobject using motor axis properties, FIRST rotates
-        % object into xy-plane and then rotates around z axis. i.e same
-        % method as above but does not rotate back.
-        %@param PointObject object, point object to rotate
-        %@param double projectionNumber, projectionNumber
-        %@param double[] theta, array of projection angles
-        %@return PointObject rotatedObject, returns point object
-        function [rotatedObject,x,y,z] = rotate0(obj,object,projectionNumber,theta)
-             Rxy = PointObject.Rxy(obj.angle);
-             T = PointObject.T(obj.currentX(projectionNumber),0,obj.currentZ(projectionNumber));
-             Rxz = PointObject.Rxz(theta(projectionNumber));
-             rotCoords = T*Rxz*(inv(T))*Rxy*object.vectorXYZ;
-             rotatedObject = PointObject(rotCoords(1),rotCoords(2),rotCoords(3));
-             x = rotCoords(1); y = rotCoords(2); z = rotCoords(3);
         end
         
         % calculates x displacement from ideal sinusoid trace (assuming

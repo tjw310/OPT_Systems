@@ -66,6 +66,7 @@ classdef ConeBeamSystem < OPTSystem
             
             if isa(obj,'SubVolumeSystem')
                 tStageDiff = obj.translationStage.getDiscreteDifferencePixels(obj);
+                tStageMotion = obj.translationStage.getMotion;
                 figure; subplot(1,2,1); plot(tStageDiff(1,:)); xlabel('Projection Number'); ylabel('Pixel Shift'); title('X-Pixel Shift'); axis square; 
                 subplot(1,2,2); plot(tStageDiff(2,:));xlabel('Projection Number'); ylabel('Pixel Shift'); title('Y-Pixel Shift'); axis square;  drawnow;
             else
@@ -88,6 +89,8 @@ classdef ConeBeamSystem < OPTSystem
                         end
                         projI = (obj.getFilteredProj(i));
                     end
+                    
+                   opShift(1) = 
 
                    u = D.*(xxS*cos(t(i))+zz*sin(t(i))-op(1)+motorOffset)...
                        ./(xxS*sin(t(i))-zz*cos(t(i))+D)+op(1)-motorOffset-tStageDiff(1,i);
@@ -95,6 +98,8 @@ classdef ConeBeamSystem < OPTSystem
                    U = (xxS*sin(t(i))-zz*cos(t(i))+D)./D;
                    
                    v = (1./U.*(index--tStageDiff(2,i)-obj.getHeight/2-op(2)))+op(2);
+                   
+                   u = u+t
 
                     u2 = u-xxS(1,1)+1;
                     v2 = v-zz(1,1)+1+(obj.getHeight-obj.getWidth)/2; %includes correction factor for different projection height vs width
@@ -109,7 +114,7 @@ classdef ConeBeamSystem < OPTSystem
 
                     plane(isnan(plane))=0;
                     slice = slice + plane;
-                    if rem(i,round(obj.getNProj/10))==0
+                    if rem(i,round(obj.getNProj/20))==0
                         disp(sprintf('Reconstruction Completion Percentage: %.1f%%',(obj.getNProj*(index-mnidx)+i)/(obj.getNProj*(mxidx-mnidx+1))*100));
                         if i==round(obj.getNProj/20)
                             figure;

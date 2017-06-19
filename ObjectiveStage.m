@@ -60,10 +60,12 @@ classdef ObjectiveStage < handle
         % @param OPTSystem optSys
         % @param StepperMotor stepperMotor
         % @param PointObject point
-        function trackPoint(obj,optSys,stepperMotor,point)
-            r = sqrt((point.getX-stepperMotor.getX)^2+(point.getZ-stepperMotor.getZ)^2);
-            phi = atan2(point.getZ-stepperMotor.getZ,point.getX-stepperMotor.getX);
-            obj.motion = r.*sin(phi+optSys.theta);
+        function trackPoint(obj,optSys,point)
+            obj.motion = zeros(1,optSys.getNProj);
+            for idx = 1:optSys.getNProj
+                [~,~,~,z(idx)] = optSys.stepperMotor.rotate(point,idx,optSys.theta);
+            end
+            obj.motion = z;
             obj.plotMotion;
         end
         

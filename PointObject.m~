@@ -51,11 +51,8 @@ classdef PointObject
             
         end
         
-        function objOut = rotateXY(obj,theta)
-            R = PointObject.Rxy(theta);
-            R = R*obj.vectorXYZ;
-            objOut = PointObject(R(1),R(2),obj.getZ);
-        end
+        function out = rotatePoint(obj,theta)
+            R = PointObject.Rxy(theta)*[obj.getX;obj.getY];
     end
     
     %% get/set methods

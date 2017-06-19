@@ -117,19 +117,26 @@ classdef TranslationStage < handle
                 av = repmat(mean(fullMotion,2),1,size(fullMotion,2));
                 fullMotion = fullMotion-av;
                 step = obj.stepSize;
+                
                 if ~isempty(obj.angle)
-                    theta = obj.angle;
-                    fullMotion = TranslationStage.rotateXYvector(fullMotion,theta);
-                    step = TranslationStage.rotateXYvector(step,theta);
-                end
-                if optSys.getRotBool==1%!?!?!?!?
-                    disp('test');
-                    beta = optSys.stepperMotor.getAngle;
-                    fullMotion = TranslationStage.rotateXYvector(fullMotion,beta);
-                    av = TranslationStage.rotateXYvector(av,beta);
-                    step = TranslationStage.rotateXYvector(step,beta);
+                    if optSys.getRotBool==1
+                        theta = obj.angle+optSys.stepperMotor.getAngle;
+                    else
+                        theta = obj.angle;
+                    end
+                else
+                    if optSys.getRotBool==1
+                        theta = optSys.stepperMotor.getAngle;
+                    else
+                        theta = 0;
+                    end
                 end
                 
+                if theta~=0
+                    fullMotion = TranslationStage.rotateXYvector(fullMotion,theta);
+                    av = TranslationStage.rotateXYvector(av,theta);
+                    step = TranslationStage.rotateXYvector(step,theta);
+                end
                 
                 full = (fullMotion+av)/optSys.getPixelSize*mag;
                 discrete = TranslationStage.discretise(fullMotion+av,step)/optSys.getPixelSize*mag;

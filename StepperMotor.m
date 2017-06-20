@@ -42,6 +42,7 @@ classdef StepperMotor < handle
         function setAngle(obj,angle)
             obj.angle = angle;
         end
+        
         %@param double[] xMotion, 1D array of length nProj
         %@param double nProj, number of projections
         function setXMotion(obj,xMotion,nProj)
@@ -54,6 +55,7 @@ classdef StepperMotor < handle
                 end
             end
         end
+        
         %@param double[] zMotion, 1D array of length nProj
         %@param double nProj, number of projections
         function setZMotion(obj,zMotion,nProj)
@@ -66,6 +68,7 @@ classdef StepperMotor < handle
                 end
             end
         end
+        
         function clearMotion(obj)
             obj.xMotion = [];
             obj.zMotion = [];
@@ -108,6 +111,11 @@ classdef StepperMotor < handle
             else
                 out = repmat(obj.z,1,nProj);
             end
+        end
+        
+        function plotMotion(obj)
+            figure; subplot(1,2,1); plot(obj.xMotion);
+            subplot(1,2,2); plot(obj.zMotion);
         end
     end
     

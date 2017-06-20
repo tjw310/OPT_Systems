@@ -6,14 +6,12 @@ classdef SubVolumeSystem < ConeBeamSystem
     properties
         translationStage % TranslationStage class object
         objectiveStage % ObjectiveStage class object
-        stepperMotor % Stepper Motor class object
     end
     
     properties (Access=private)
         objectiveR % effecitve objective source-detector distance
         piezoMagChange % MagChange object representing change in mag due to piezo alone
         etlMagChange % MagChange object representing change in mag due to piezo AND ETL
-        rotatedBool=0 % boolean idenifying if the projections have been rotated from their raw value
         scaleBool=0 % boolean identifying if the projections have been scaled from their raw value
         correctedMIP %double[][] corrected MIP for discrete t-stage motion
     end
@@ -45,21 +43,10 @@ classdef SubVolumeSystem < ConeBeamSystem
             end
         end
         
-        %GET/SET METHODS
-        function out = getTransStage(obj)
-            out = obj.translationStage;
-        end
-        function out = getObjectiveStage(obj)
-            out = obj.objectiveStage;
-        end
-        % @param TranslationStage tStage, translation stage class object
-        function setTransStage(obj,tStage)
-            obj.translationStage = tStage;
-        end
-        % @param ObjectiveStage obStage, objective stage class object
-        function setObjectiveStage(obj,obStage)
-            obj.objectiveStage = obStage;
-        end
+        %GET/SET METHODS  
+        function setObjectiveR(obj,R)
+            obj.objectiveR = R;
+        end  
         function out = getObjectiveR(obj)
             out = obj.objectiveR;
         end
@@ -69,46 +56,62 @@ classdef SubVolumeSystem < ConeBeamSystem
         function out = getETLMagChange(obj)
             out = obj.etlMagChange;
         end
-        function out = getRotBool(obj)
-            out = obj.rotatedBool;
+        function setETLMagChange(obj,magChange)
+            obj.etlMagChange = magChange;
         end
+        function setPiezoMagChange(obj,magChange)
+            obj.piezoMagChange = magChange;
+        end 
         function out = getCorrectedMIP(obj)
             out = obj.correctedMIP;
         end
-        function setRotBool(obj,bool)
-            obj.rotatedBool = bool;
-        end
+        
     end
     
     %% MAIN METHODS
     methods
+        %main setup including LOAD and SET CALIBRATION and ROTATE/SCALE
+        %projetions
         function setup(obj,objective)
             obj.loadProjections();
-            obj.magnificationCalibration(objective,'piezo'
+            obj.magnificationCalibration(objective,'piezo');
+            obj.magnificationCalibration(objective,'both');
+            obj.loadOStage;
+            obj.loadTStage;
+            obj.findAoRAngle;
+            obj.rotateProjections;
+            obj.scaleProjections(objective);
+        end
         
     end
     
     %% Load translation stage and piezo movements
     methods
-        function loadTStage(obj)
-            if ~isempty(obj.translationStage.getMagAoR)   
+        function loadTStage(obj,type)
+            if ~isempty(obj.translationStage.getMagAoR)
                 if exist(fullfile(obj.getPath,'Stage Positions'),'file')==2
-                    discretePositions = dlmread(fullfile(obj.getPath,'Stage Positions'));
-                    dx = discretePositions(1,:);
-                    dy = discretePositions(2,:);
-                    
-                    %% temporay code as images did not save with enough double string precision
-                    dy = (dx-min(dx))/(max(dx)-min(dx))*(-1.806217+1.810204)+1.806217;
-                    
-                    %%
-                    stepX = dx(2:end)-dx(1:end-1); stepX = nanmean(abs(stepX(stepX~=0)));
-                    stepY = dy(2:end)-dy(1:end-1); stepY = nanmean(abs(stepY(stepY~=0)));
-                    [xContinuousInfo,xFullMotion] = TranslationStage.fitSinusoidToDiscreteData(dx);
-                    [yContinuousInfo,yFullMotion] = TranslationStage.fitSinusoidToDiscreteData(dy);
-                    obj.translationStage.setMotionAngle(atan2(yContinuousInfo(1),xContinuousInfo(1)));
-                    obj.translationStage.setMotion([dx-xContinuousInfo(3);dy-yContinuousInfo(3)]);
-                    obj.translationStage.setFullMotion([xFullMotion-xContinuousInfo(3);yFullMotion-yContinuousInfo(3)]);
-                    obj.translationStage.setStepSize([stepX;stepY]);
+                    stageMotion = dlmread(fullfile(obj.getPath,'Stage Positions'));
+                    dx = stageMotion(1,:);
+                    dy = stageMotion(2,:);
+                    obj.translationStage.setType(type);
+                    switch type
+                        case 'discrete'
+                            stepX = dx(2:end)-dx(1:end-1); stepX = nanmean(abs(stepX(stepX~=0)));
+                            stepY = dy(2:end)-dy(1:end-1); stepY = nanmean(abs(stepY(stepY~=0)));
+                            if isnan(stepY)
+                                stepY = 0;
+                            end
+                            [xContinuousInfo,xFullMotion] = TranslationStage.fitSinusoidToDiscreteData(dx);
+                            [yContinuousInfo,yFullMotion] = TranslationStage.fitSinusoidToDiscreteData(dy);
+                            obj.translationStage.setMotionAngle(atan2(yContinuousInfo(1),xContinuousInfo(1)));
+                            obj.translationStage.setMotion([dx-xContinuousInfo(3);dy-yContinuousInfo(3)]);
+                            obj.translationStage.setFullMotion([xFullMotion-xContinuousInfo(3);yFullMotion-yContinuousInfo(3)]);
+                            obj.translationStage.setStepSize([stepX;stepY]);
+                        case 'continuous'
+                            obj.translationStage.setMotion([dx-nanmean(dx);dy-nanmean(dy)]);
+                            obj.translationStage.setFullMotion([dx-nanmean(dx);dy-nanmean(dy)]);
+                            obj.translationStage.setStepSize([NaN;NaN]);
+                    end
                 else
                     error('No Stage Positions file exists');
                 end
@@ -129,54 +132,15 @@ classdef SubVolumeSystem < ConeBeamSystem
     end
     
     %% Rotation/Scale of projections and initialisation of stepper motor from calibiration information
-    methods
-        function rotateProjections(obj)
-            if isempty(obj.stepperMotor)
-                if isempty(obj.stepperMotor.getAngle)
-                    error('Please assign angle to stepper motor. (run obj.findAoRAngle)');
-                end
-            end
-            rotationAngle = obj.stepperMotor.getAngle;
-            p = obj.getProjection(1);
-            [xx,yy]= meshgrid(1:size(p,2),1:size(p,1));
-            xxR = xx.*cos(rotationAngle)-yy.*sin(rotationAngle);
-            yyR = yy.*cos(rotationAngle)+xx.*sin(rotationAngle);
-            projArray = single(zeros(size(obj.getAllProjections)));
-            switch obj.getUseGPU
-                case 0
-                    for idx=1:obj.getNProj
-                        p = interp2(obj.getProjection(idx),xxR,yyR);
-                        p(isnan(p))=0;
-                        projArray(:,:,idx)=p;
-                        if rem(idx,obj.getNProj/25)==0
-                            disp(sprintf('rotation completion: %.0f%%',idx/obj.getNProj*100));
-                        end
-                    end
-                case 1
-                    xxR=gpuArray(xxR); yyR = gpuArray(yyR);
-                    for idx=1:obj.getNProj
-                        p = gpuArray(obj.getProjection(idx));
-                        out = interp2(p,xxR,yyR);
-                        out(isnan(out))=0;
-                        out = gather(out);
-                        projArray(:,:,idx)=out;
-                        if rem(idx,obj.getNProj/25)==0
-                            disp(sprintf('rotation completion: %.0f%%',idx/obj.getNProj*100));
-                        end
-                    end
-            end
-            obj.rotatedBool = 1;
-            obj.replaceProjections(projArray);
-        end
-        
-        function scaleProjections(obj,objective)
+    methods       
+        function scaleProjections(obj)
             if isempty(obj.objectiveStage)
                 error('Please load objective stage');
             end
-            objectiveRinMM = obj.objectiveR*obj.getPixelSize/objective.getMagnification;
+            objectiveRinMM = obj.objectiveR*obj.getPixelSize/obj.objective.getMagnification;
             [xx,yy] = meshgrid(obj.xPixels,obj.yPixels);
             projArray = single(zeros(size(obj.getAllProjections)));
-            op = obj.getOpticCentrePixels(objective);
+            op = obj.getOpticCentrePixels();
             switch obj.getUseGPU
                 case 0
                     for idx=1:obj.getNProj
@@ -208,33 +172,7 @@ classdef SubVolumeSystem < ConeBeamSystem
             obj.scaleBool = 1;
             obj.replaceProjections(projArray);
         end
-        
-        % @param int index, index of projection required
-        function out = rotateProjection(obj,index)
-            rotationAngle = obj.translationStage.getMotionAngle-obj.translationStage.getAngle;
-            switch obj.getUseGPU
-                case 0
-                    tic
-                    p = obj.getProjection(index);
-                    [xx,yy]= meshgrid(1:size(p,2),1:size(p,1));
-                    xxR = xx.*cos(rotationAngle)-yy.*sin(rotationAngle);
-                    yyR = yy.*cos(rotationAngle)+xx.*sin(rotationAngle);
-                    out = interp2(p,xxR,yyR);
-                    out(isnan(out))=0;
-                    toc
-                case 1
-                    tic
-                    p = gpuArray(obj.getProjection(index));
-                    [xx,yy]= meshgrid(gpuArray(1:size(p,2)),gpuArray(1:size(p,1)));
-                    xxR = xx.*cos(rotationAngle)-yy.*sin(rotationAngle);
-                    yyR = yy.*cos(rotationAngle)+xx.*sin(rotationAngle);
-                    out = interp2(p,xxR,yyR);
-                    out(isnan(out))=0;
-                    out = gather(out);
-                    toc
-            end
-        end
-        
+
         % @param int index, index of projection required
         function out = scaleProjection(obj,index,objective)
             objectiveRinMM = obj.objectiveR*obj.getPixelSize/objective.getMagnification;
@@ -247,6 +185,7 @@ classdef SubVolumeSystem < ConeBeamSystem
             out = interp2(obj.getProjection(index),xS,yS);
         end
     end
+    
     %% Calibration methods
     methods
         % calculates the magnifcation change between 0 and 180 paired
@@ -258,7 +197,7 @@ classdef SubVolumeSystem < ConeBeamSystem
         % @param string type, either 'piezo' or 'both' for piezo move only,
         % or piezo and etl move together
         % @param Objective objective, objective used
-        function magnificationCalibration(obj,objective,type,varargin)
+        function magnificationCalibration(obj,type,varargin)
             if strcmp(type,'both')
                 if isempty(obj.objectiveR)
                     error('Please run magnificationCalibration with PIEZO type first');
@@ -275,7 +214,12 @@ classdef SubVolumeSystem < ConeBeamSystem
             if isempty(im_dir)
                 im_dir = dir(fullfile(im_path,'*.tiff'));
             end
-
+            
+            if isempty(obj.objective)
+                error('Please assign objective');
+            else
+                objective = obj.objective;
+            end
             nProj = length(im_dir); imPortionSize = 60;
 
             for i=1:2:nProj
@@ -318,11 +262,11 @@ classdef SubVolumeSystem < ConeBeamSystem
             
             switch type
                 case 'piezo'
-                    obj.piezoMagChange = MagChange(deltaMag,zProgram(1,1),zProgram(1,2),im_path);
+                    obj.piezoMagChange = MagChange(deltaMag,magChangeError,zProgram(1,1),zProgram(1,2),im_path);
                     obj.objectiveR = obj.piezoR(objective);
                     obj.findStageAngleandConstantMagnification(xReal,yReal,xProgram,yProgram,zProgram,objective);
                 case 'both'
-                    obj.etlMagChange = MagChange(deltaMag,zProgram(1,1),zProgram(1,2),im_path);
+                    obj.etlMagChange = MagChange(deltaMag,magChangeError,zProgram(1,1),zProgram(1,2),im_path);
                     obj.setR(obj.etlWithPiezoR(objective));
                 otherwise
                     error('Invalid type');
@@ -331,38 +275,111 @@ classdef SubVolumeSystem < ConeBeamSystem
                 
         % shifts projections based on calibration into maximum intensity
         % projection
-        %
-        function findAoRAngle(obj)
-            if isempty(obj.correctedMIP)
-                projSize = size(obj.getAllProjections);
-                allMotion = obj.translationStage.getAllMotionPixels(obj,0);
-                colSize = ceil(max(abs(allMotion(1,:))));
-                rowSize = ceil(max(abs(allMotion(2,:))));
-                if rem(rowSize,2)~=0
-                    rowSize = rowSize+1;
-                end
-                if rem(colSize,2)~=0
-                    colSize = colSize+1;
-                end
-                mip = zeros(projSize(1)+2*rowSize,projSize(2)+2*colSize);
-                for k=1:obj.getNProj
+        % @param varargin, 'new' to re-calculate corrected MIP
+        function findAoRAngle(obj,varargin)
+            if (nargin==2 && strcmp(varargin{1},'new')) || isempty(obj.correctedMIP)
+                obj.calculateCorrectedMIP;
+            end
+            mip = obj.correctedMIP;
+            
+             [x,y]=OPTSystem.fastPeakFind(mip,1,nanmean(mip(:)));
+             figure; imagesc(mip); hold on; scatter(x,y,'r'); hold off;
+            xMin = input('Enter min x value:');
+            yMin = input('Enter min y value:');
+            xMax = input('Enter max x value:');
+            yMax = input('Enter min y value:');
+   
+            [xSub,ySub] = OPTSystem.peakSubset(x,y,xMin,xMax,yMin,yMax);
+            
+            [linearFitVariables,~,fit] = OPTSystem.fitLinear(xSub,ySub);
+            figure; scatter(xSub,ySub); hold on; 
+            plot(xSub,fit); hold off;
+            angle = -atan(linearFitVariables(1));       
+            
+            obj.stepperMotor.setAngle(angle);
+            
+            rot = OPTSystem.rotateImage(mip,-angle,obj.getUseGPU);
+            figure; imagesc(rot);
+        end
+        
+        %estimates motor motion from subset of peaks found in raw
+        %projections
+        % @param varargin, 'new' to re-calculate corrected MIP
+        function estimateMotorMotion(obj,varargin)
+            if (nargin==2 && strcmp(varargin{1},'new')) || isempty(obj.correctedMIP)
+                obj.calculateCorrectedMIP;
+            end
+            mip = obj.correctedMIP;
+            
+             [x,y]=OPTSystem.fastPeakFind(mip,1,nanmean(mip(:)));
+             figure; imagesc(mip); hold on; scatter(x,y,'r'); hold off;
+            xMin = input('Enter min x value:');
+            yMin = input('Enter min y value:');
+            xMax = input('Enter max x value:');
+            yMax = input('Enter min y value:');
+            
+            projSize = size(obj.getAllProjections);
+            allMotion = obj.translationStage.getAllMotionPixels(obj);
+            colSize = ceil(max(abs(allMotion(1,:)))); if isnan(colSize); colSize=0; end;
+            rowSize = ceil(max(abs(allMotion(2,:)))); if isnan(rowSize); rowSize=0; end;
+            
+            for k=1:obj.getNProj
+                if rowSize==0 && colSize==0
+                    p = obj.getProjection(k);
+                else
                     T = flipud(obj.translationStage.getMotionPixels(k,obj));
                     p = obj.translateProjection(round(T),k,'extend',[projSize(1)+2*rowSize,projSize(2)+2*colSize]);
-                    mip = max(p,mip);
                 end
-                obj.correctedMIP = mip;
-            else
-                mip = obj.correctedMIP;
+                p = p(yMin:yMax,xMin:xMax);
+                p(isnan(p)) = nanmean(p(:));
+                [x,y]=OPTSystem.fastPeakFind(p,1,nanmean(p(:)));
+                xSub(k) = nanmean(x); ySub(k) = nanmean(y);
+                if rem(k,obj.getNProj/10)==0
+                    disp(sprintf('peak finding completion: %.1f%%',k/obj.getNProj*100));
+                end
             end
-            [x,y]=OPTSystem.fastPeakFind(mip,1,nanmean(mip(:)));
-            figure; imagesc(mip); hold on; scatter(x,y,'r'); hold off;
-            x1 = input('Enter point 1 x value:');
-            y1 = input('Enter point 1 y value:');
-            x2 = input('Enter point 2 x value:');
-            y2 = input('Enter point 2 y value:');
-            angle = atan2(y2-y1,x2-x1);
-            obj.stepperMotor = StepperMotor();
-            obj.stepperMotor.setAngle(angle);
+            xSub(xSub==0)=NaN;  ySub(ySub==0)=NaN;
+            
+            if obj.getRotBool==0
+                rotSub = TranslationStage.rotateXYvector([xSub;ySub],obj.stepperMotor.getAngle);
+            else
+                rotSub = [xSub;ySub];
+            end
+            
+            [estimates,~,fit]= OPTSystem.fitSinusoid(rotSub(1,:));
+            
+            if nnz(obj.objectiveStage.getMotion)~=0 &&  nnz(obj.translationStage.getMotion)==0
+                if ~isempty(obj.translationStage.getMagAoR)
+                    idealTranslation = fit*obj.getPixelSize/obj.translationStage.getMagAoR;
+                else
+                    idealTranslation = fit*obj.getPixelSize/obj.objective.getMagnification;
+                end
+                obj.translationStage.setMotion([-idealTranslation;zeros(1,length(fit))]);
+                obj.translationStage.setFullMotion([idealTranslation;zeros(1,length(fit))]);
+            end
+            
+            centre = estimates(3)-size(mip,2)/2+xMin;
+            shift = centre*obj.getPixelSize/obj.objective.getMagnification;
+            excessXMotion = (rotSub(1,:)-fit)*obj.getPixelSize/obj.objective.getMagnification;
+            excessYMotion = (rotSub(2,:)-nanmean(rotSub(2,:))).*obj.getPixelSize/obj.objective.getMagnification;
+            
+            nanIndexes = abs(excessXMotion)>(nanmean(excessXMotion)+2*nanstd(excessXMotion));
+            excessXMotion(nanIndexes)=NaN;
+            excessYMotion(nanIndexes)=NaN;
+            
+            interpMotion = OPTSystem.interpolateNaNValues([excessXMotion;excessYMotion]);
+            
+            obj.stepperMotor.setX(shift);
+            obj.stepperMotor.setXMotion(interpMotion(1,:),obj.getNProj);
+            
+            figure; scatter(1:size(rotSub,2),rotSub(1,:)); hold on; plot(fit); hold off; drawnow;
+            figure; subplot(1,2,1); plot(interpMotion(1,:)); hold on; plot(excessXMotion); hold off; ylabel('(mm)'); xlabel('Projection Number');  title('Excess X-Motion'); axis square;
+            subplot(1,2,2); plot(interpMotion(2,:)); hold on; plot(excessYMotion); hold off; ylabel('(mm)'); xlabel('Projection Number');  title('Excess Y-Motion'); axis square;
+        end
+        
+        %displays extended MIP correcting for translation stage motion.
+        function showCorrectMIP(obj)
+            figure; imagesc(obj.correctedMIP);
         end
     end
     
@@ -394,7 +411,10 @@ classdef SubVolumeSystem < ConeBeamSystem
             magChangeAlternativeMethod = est(2,1)/est(1,1);
             ratio = (1-magChangeAlternativeMethod)/(1-obj.piezoMagChange.deltaMag);
             
-            if ratio>1.1 || ratio<0.9
+           
+            fprintf('Calib Piezo Mag Change = %.5f, Alt Method = %.5f',obj.piezoMagChange.deltaMag,magChangeAlternativeMethod);
+            if (0.9<ratio && ratio<1.1) || (magChangeAlternativeMethod<(obj.piezoMagChange.deltaMag+obj.piezoMagChange.error) && magChangeAlternativeMethod>(obj.piezoMagChange.deltaMag-obj.piezoMagChange.error))
+            else   
                 error('Error fitting results in incorrect estimates of magnification change between images');
             end 
             
@@ -451,6 +471,33 @@ classdef SubVolumeSystem < ConeBeamSystem
 
     %% Private methods
     methods 
+        % works out extended MIP by correctin for translation stage motion
+        function calculateCorrectedMIP(obj)
+            projSize = size(obj.getAllProjections);
+            obj.translationStage.clearMotionPixels;
+            allMotion = obj.translationStage.getAllMotionPixels(obj);
+            colSize = ceil(max(abs(allMotion(1,:)))); if isnan(colSize); colSize=0; end;
+            rowSize = ceil(max(abs(allMotion(2,:)))); if isnan(rowSize); rowSize=0; end;
+            if rowSize==0 && colSize==0
+                obj.correctedMIP = obj.getMIP;
+            else
+                if rem(rowSize,2)~=0
+                    rowSize = rowSize+1;
+                end
+                if rem(colSize,2)~=0
+                    colSize = colSize+1;
+                end
+                mip = zeros(projSize(1)+2*rowSize,projSize(2)+2*colSize);
+
+                for k=1:obj.getNProj
+                    T = flipud(obj.translationStage.getMotionPixels(k,obj));
+                    p = obj.translateProjection(round(T),k,'extend',[projSize(1)+2*rowSize,projSize(2)+2*colSize]);
+                    mip = max(p,mip);
+                end
+                obj.correctedMIP = mip;
+            end
+        end
+        
          %calculate effective source-detector distance R in unbinned pixels
         %for piezo only moving
         % @param MagChange piezoMagChange
@@ -652,16 +699,8 @@ classdef SubVolumeSystem < ConeBeamSystem
                 end
                 sse = nansum(mins);
             end
-        end
-        
-
-
-        
+        end 
        
-    end
-    
-    
-        
-    
+    end  
 end
 

@@ -8,6 +8,7 @@ classdef TranslationStage < handle
         angle %angle of translation stage axis with respect to detector pixels
         magAoR %magnification of movements at the axis of rotation. i.e dx(pixels)=dx(mm)*optSystem.PixelSize/TranslationStage.magAoR;
         motionAngle %angle of motion in radians, motion should be linear at an angle
+        type % string, either discrete or continuous
         
         motionPixels %double [1x2][] discrete stage motion in image-space binned pixels
         fullMotionPixels %double [1x2][] continuous stage motion in image-space binned pixels
@@ -19,9 +20,17 @@ classdef TranslationStage < handle
         end
         
         %% GET /SET
-        % @param double angle, in radians
-        function setAngle(obj,angle)
-            obj.angle = angle;
+        % @param string type, type of motion either 'discrete' or
+        % 'continuous'
+        function setType(obj,type)
+            switch type
+                case 'discrete'
+                    obj.type = 'discrete';
+                case 'continuous'
+                    obj.type = 'continuous';
+                otherwise
+                    error('Incorrect stage motion type');
+            end
         end  
         % @param double magAoR, magnifcation at the axis of rotation
         function setMagAoR(obj,magAoR)
@@ -44,7 +53,14 @@ classdef TranslationStage < handle
         function setMotionAngle(obj,motionAngle)
             obj.motionAngle = motionAngle;
         end
-        
+        % @param double angle, angle of translation stage axis in relation
+        % to image pixels
+        function setAngle(obj,angle)
+            obj.angle = angle;
+        end
+        function out = getType(obj)
+            out = obj.type;
+        end
         function out = getStepSize(obj)
             out = obj.stepSize;
         end
@@ -139,7 +155,12 @@ classdef TranslationStage < handle
                 end
                 
                 full = (fullMotion+av)/optSys.getPixelSize*mag;
-                discrete = TranslationStage.discretise(fullMotion+av,step)/optSys.getPixelSize*mag;
+                if strcmp(obj.type,'discrete')
+                    discrete = TranslationStage.discretise(fullMotion+av,step)/optSys.getPixelSize*mag;
+                else
+                    discrete = full;
+                end
+                full(isnan(full)) = 0; discrete(isnan(discrete)) = 0;
                 obj.motionPixels = discrete;
                 obj.fullMotionPixels = full;
             end
@@ -313,6 +334,10 @@ classdef TranslationStage < handle
             end   
         end
         
+        %function that rotates a data array that is horizontal
+        %concatanation of [x;y] vectors
+        % @param double [1x2][] xyVector
+        % @param double theta, angle in radians
         function xyVectorOut= rotateXYvector(xyVector,theta)
             R = [cos(theta),-sin(theta);sin(theta),cos(theta)];   
             for k=1:size(xyVector,2)

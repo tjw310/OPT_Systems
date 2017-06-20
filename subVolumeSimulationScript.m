@@ -37,15 +37,15 @@ sv.translationStage.trackPoint(sv,obTrack,1e-10);
 %%
 c.setHeight(2160);
 c.setWidth(2560);
-c.setBinFactor(sv.getBinFactor);
+c.setBinFactor(4);
 c.stepperMotor = sv.stepperMotor;
 c.setRotationDirection('clock');
 c.setAxisDirection('vert');
-c.setR(R);
-c.setNProj(100);
-c.setNAngles(360);
+c.setR(sv.getR);
+c.setNProj(sv.getNProj);
+c.setNAngles(sv.getNAngles);
 c.setApertureRadius(sv.getApertureRadius);
-c.setRotBool(1);
+c.setRotBool(0);
 c.objective = sv.objective;
 
 %%

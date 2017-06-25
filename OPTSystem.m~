@@ -14,7 +14,12 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         lambda = 500e-6; %wavelength in mm
         apertureRadius %radius of aperture stop in mm
         focalPlaneOffset = 0 % focal plane z-offset from motor axis in mm
-        n = 1; %refractive index of immersion medium, default air=1
+        n = 1.3325; %refractive index of immersion medium, default water = 1.3325
+        
+        %System Type (focal scan vs static)
+        scanBoolean = 0 % boolean, '1' for focal scanning system, '0' for no scan (default)
+        focalScanRange = [] % double, length of object space focal scan range in mm
+        scanType = [] % string, scan type, needs to be either 'linear' or 'sinusoid'
         
         % Large Data
         projections %raw projection information
@@ -33,7 +38,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         unbinnedHeight %number of pixels in direction parallel to the rotation axis (not binned)
     end
     
-    properties (Access = public)
+    properties (Access = public)        
         % Simulation Parameters
         AF % AmbiguityFunction object
                 
@@ -47,6 +52,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         %constructor
         function obj = OPTSystem()
             obj.path = uigetdir();
+            obj.stepperMotor = StepperMotor;
         end           
         function out = getPath(obj)
             out = obj.path;
@@ -244,6 +250,36 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             out = obj.rotatedBool;
         end
         
+        % @param boolean scanBoolean
+        function setScanBoolean(obj,scanBoolean)
+            obj.scanBoolean = scanBoolean;
+            obj.clearProjections;
+            obj.AF = [];
+        end
+        function out = getScanBoolean(obj)
+            out = obj.scanBoolean;
+        end
+        
+        % @param double focalScanRange
+        function setFocalScanRange(obj,focalScanRange)
+            obj.focalScanRange = focalScanRange;
+            obj.clearProjections;
+            obj.AF = [];
+        end
+         function out = getFocalScanRange(obj)
+            out = obj.focalScanRange;
+        end
+        
+        % @param string scanType
+        function setScanType(obj,scanType)
+            obj.scanType = scanType;
+            obj.clearProjections;
+            obj.AF = [];
+        end
+         function out = getScanType(obj)
+            out = obj.scanType;
+        end
+        
     end
     
     %% abstract methods
@@ -251,13 +287,16 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         reconstruct(obj);
     end
     
-    %% projection load / manipulation
+    %% projection methods
     methods
+        %% Load
         %load projection images from file (assume cropped to centre, if
         %cropped, varargin = nAngles either 180 or 360 (default is 360)
         function loadProjections(obj,varargin)
             obj.projections = [];
             obj.filteredProj = [];
+            obj.setRotBool(0);
+            obj.MIP = [];
             if nargin<=1   
                 obj.path = uigetdir();
             end
@@ -270,6 +309,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             for i=1:obj.nProj
                 if i==1
                     im = single(imread(strcat(fullfile(obj.path,char(cellstr(im_dir(i).name))))));
+                    im_sz = size(im);
                     obj.projections = single(zeros(im_sz(1),im_sz(2),obj.nProj));
                 else
                     im = single(imread(strcat(fullfile(obj.path,char(cellstr(im_dir(i).name))))));
@@ -302,6 +342,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
    
         end
         
+        %% Manipulation
         %@param int binFactor, choose to square bin the projections
         %(requires even
         function binProjections(obj,binFactor)
@@ -327,6 +368,65 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.projections = [];
             obj.projections = binnedProj;
             obj.binFactor = binFactor;                   
+        end
+        
+        % function to crop projections around centre
+        function cropProjections(obj,cropedSize)
+            szProj = size(obj.projections);
+            idxRow = (szProj(1)-cropedSize(1))/2+1:(szProj(1)+cropedSize(1))/2;
+            idxCol = (szProj(2)-cropedSize(2))/2+1:(szProj(2)+cropedSize(2))/2;
+            for k=1:obj.nProj
+                p = obj.projections(:,:,k);
+                pCrop(:,:,k) = p(idxRow,idxCol);
+                disp(sprintf('crop completion: %.1f%%',k/obj.nProj*100));
+            end
+            obj.replaceProjections(pCrop);
+            obj.setWidth(cropedSize(2)*obj.getBinFactor);
+            obj.setHeight(cropedSize(1)*obj.getBinFactor);
+        end
+        
+        % rotates projections by stepper motor angle
+        function rotateProjections(obj)
+            if isempty(obj.stepperMotor)
+                if isempty(obj.stepperMotor.getAngle)
+                    error('Please assign angle to stepper motor');
+                end
+            end
+            rotationAngle = -obj.stepperMotor.getAngle;
+            p = obj.getProjection(1);
+            [xx,yy] = meshgrid(obj.xPixels,obj.yPixels);
+            xxR = xx.*cos(rotationAngle)-yy.*sin(rotationAngle)-xx(1,1)+1;
+            yyR = yy.*cos(rotationAngle)+xx.*sin(rotationAngle)-yy(1,1)+1;
+            projArray = single(zeros(size(obj.getAllProjections)));
+            switch obj.getUseGPU
+                case 0
+                    for idx=1:obj.getNProj
+                        p = interp2(obj.getProjection(idx),xxR,yyR);
+                        p(isnan(p))=nanmean(p(:));
+                        projArray(:,:,idx)=p;
+                        if rem(idx,obj.getNProj/25)==0
+                            disp(sprintf('rotation completion: %.0f%%',idx/obj.getNProj*100));
+                        end
+                        subplot(1,2,1); imagesc(obj.getProjection(idx)); axis square;
+                        subplot(1,2,2); imagesc(p); axis square; drawnow;
+                    end
+                case 1
+                    xxR=gpuArray(xxR); yyR = gpuArray(yyR);
+                    for idx=1:obj.getNProj
+                        p = gpuArray(obj.getProjection(idx));
+                        out = interp2(p,xxR,yyR);
+                        out(isnan(out))=nanmean(out(:));
+                        out = gather(out);
+                        projArray(:,:,idx)=out;
+                        if rem(idx,obj.getNProj/25)==0
+                            disp(sprintf('rotation completion: %.0f%%',idx/obj.getNProj*100));
+                        end
+                    end
+            end
+            op = obj.getOpticCentre;
+            obj.setOpticCentre(TranslationStage.rotateXYvector(op.',rotationAngle).');
+            obj.setRotBool(1);
+            obj.replaceProjections(projArray);
         end
         
         % shifts single projection to the nearest pixel by vector T
@@ -418,18 +518,23 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.projections = newProjections;
         end
         
-        % @param double mnidx, minimum slice number index
-        % @param double mxidx, maximum slice number index to reconstruct
-        % @param boolean displayBoolean, true to display slices
-        % @param boolean varargin{1}, display boolean, true==new figure
+        %% Reconstruction
+        % @param varargin:
+            % @param double mnidx, minimum slice number index
+            % @param double mxidx, maximum slice number index to reconstruct
+            % @param boolean displayBoolean, true to display slices
         function reconstructProjections(obj,varargin)
+            if isempty(obj.projections)
+                error('No projections to reconstruct');
+            end
             if isempty(obj.objective) || isempty(obj.stepperMotor)
                 error('Please assign objective and stepper motor');
             end
             narginchk(2,5);
-            [mnidx,mxidx,displayBoolean,obStage,tStage] = parse_inputs(varargin{:});
+            [mnidx,mxidx,displayBoolean] = parse_inputs(varargin{:});
             reconstructionFolderName = 'Reconstructions';
-            if ~isdir(fullfile(obj.path,reconstructionFolderName))
+            if exist(fullfile(obj.path,reconstructionFolderName))==0
+                disp('making directory');
                 mkdir(obj.path,reconstructionFolderName);
                 dlmwrite(fullfile(fullfile(obj.path,reconstructionFolderName),'MaxMinValues.txt'),zeros(obj.getHeight,2),';');
             elseif exist(fullfile(fullfile(obj.path,reconstructionFolderName),'MaxMinValues.txt'))~=2
@@ -438,31 +543,31 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             obj.outputPath = fullfile(obj.path,reconstructionFolderName);
             if displayBoolean
                 figure;
-                reconstruct(obj,mnidx,mxidx,obStage,tStage,true);
+                reconstruct(obj,mnidx,mxidx,true);
             else
-                reconstruct(obj,mnidx,mxidx,obStage,tStage,false);
+                reconstruct(obj,mnidx,mxidx,false);
             end
+            
+            objective = obj.objective;
+            stepperMotor = obj.stepperMotor;
             
             save(fullfile(obj.path,'objective.mat'),'objective');
             save(fullfile(obj.path,'stepperMotor.mat'),'stepperMotor');
             
             %input parser
-            function [mnidx,mxidx,displayBoolean,obStage,tStage] = parse_inputs(varargin)
-                numbers = []; obStage = []; tStage = []; displayBoolean = false;
+            function [mnidx,mxidx,displayBoolean] = parse_inputs(varargin)
+                numbers = []; displayBoolean = false;
                 for argNumber=1:nargin
                     arg = varargin{argNumber};
                     type = class(arg);
                     switch type
                         case 'double'
                             numbers = horzcat(numbers,arg);
-                        case 'logical'
-                            displayBoolean = arg;
-                        case 'PointObject'
-                            pointObject = arg;
-                        case 'ObjectiveStage'
-                            obStage = arg;
-                        case 'TranslationStage'
-                            tStage = arg;
+                        case {'logical','char'}
+                            if isa(arg,'char') && strcmp(arg,'true')    
+                                displayBoolean = 1;
+                            end
+                            displayBoolean = arg;  
                     end
                 end
                 if length(numbers)==2
@@ -476,6 +581,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                             
         end
         
+        % Use after reconstruction, to normalise slices
         function normaliseReconstructions(obj)
             if exist(fullfile(obj.outputPath,'MaxMinValues.txt'))~=2
                 error('Please reconstruct projections first');
@@ -487,34 +593,48 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 if isempty(im_dir)
                     im_dir = dir(fullfile(obj.outputPath,'*.tiff'));
                 end
-                for i=1:length(im_dir)
-                    im = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(i).name))))));
-                    im_name = strsplit(im_dir(i).name,'.');
-                    index = str2double(im_name{1});
-                    im = im./65535*((maxMinValues(index,2)-maxMinValues(index,1))+maxMinValues(index,1));
-                    im = uint16((im-minimumValue)./(maximumValue-minimumValue).*65535);
-                    imagesc(im); axis equal tight; caxis([0,2^16-1]); drawnow; pause(.3);
-                    imwrite(im,strcat(fullfile(obj.getOutputPath,num2str(index,'%05d')),'.tiff'));
-                    disp(sprintf('Normalisation Completion Percentage: %.1f%%',i/length(im_dir)*100));
-                end 
+                
+                %check procedure
+                imFirst = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(1).name))))));
+                imRand = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(round(rand*length(im_dir))).name))))));
+                mnFirst = min(imFirst(:));
+                mnRand = min(imRand(:));
+                mxFirst = max(imFirst(:));
+                mxRand = max(imRand(:));
+                
+                if mnFirst==mnRand && mnFirst == 0 && mxFirst==mxRand                
+                    for i=1:length(im_dir)
+                        im = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(i).name))))));
+                        im_name = strsplit(im_dir(i).name,'.');
+                        index = str2double(im_name{1});
+                        im = im./65535*((maxMinValues(index,2)-maxMinValues(index,1))+maxMinValues(index,1));
+                        im = uint16((im-minimumValue)./(maximumValue-minimumValue).*65535);
+                       % imagesc(im); axis equal tight; caxis([0,2^16-1]); drawnow; pause(.3);
+                        imwrite(im,strcat(fullfile(obj.getOutputPath,num2str(index,'%05d')),'.tiff'));
+                        disp(sprintf('Normalisation Completion Percentage: %.1f%%',i/length(im_dir)*100));
+                    end
+                else
+                    error('Already Normalised (or other error)');
+                end
             end
         end
         
-        %@param Objective objective, objective class
-        %@param PointObject pointObject, point object class
-        %@param PointObject[] pointObject, array of pointObjects
-        %@param StepperMotor stepperMotor, stepper motor class provides aor
-        %position
-        % @param boolean varargin{1}, true if want to display projection
+        %% Simulation
+        
+        % simulates projections
+        % @param varargin:
+                % @param boolean displayBoolean, true to display
+                % @param PointObject[] pointObject, array of
+                % pointObjects to simulate
         function simulateProjections(obj,varargin)
             if isempty(obj.objective) || isempty(obj.stepperMotor)
                 error('Please assign objective and stepper motor');
             end
-            narginchk(1,5);
+            narginchk(2,3);
             [pointObject,displayBoolean] = parse_inputs(varargin{:});
             objective = obj.objective;
             stepMotor = obj.stepperMotor;
-            obj.calculateAF(obj.objective);
+            obj.calculateAF();
             switch class(obj)
                 case 'ConeBeamSystem'
                     obj.calculateApertureDisplacement(obj.objective);
@@ -529,7 +649,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                     tStage = [];
             end
             if isempty(obj.apertureRadius)
-                obj.apertureRadius = 2*objective.getRadiusPP;
+                obj.apertureRadius = obj.objective.getRadiusPP;
             end
             
             obj.clearProjections;
@@ -600,16 +720,15 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 if displayBoolean
                     if i==1
                         h=figure;
-                        xlabel('mm'); title('Binned Image Sensor'); axis equal tight;
                     end
-                    imagesc(xRange,yRange,I); drawnow;
-                    if i==obj.getNProj
-                        figure; subplot(1,3,1); plot(xMot); axis square; title('Object Effective x-motion (mm)');
-                        subplot(1,3,2); plot(yMot); axis square; title('Object Effective y-motion (mm)');
-                        subplot(1,3,3); plot(allZ); axis square; title('Object Effective z-offsets (mm)');
-                    end
+%                     if i==obj.getNProj
+%                         figure; subplot(1,3,1); plot(xMot); axis square; title('Object Effective x-motion (mm)');
+%                         subplot(1,3,2); plot(yMot); axis square; title('Object Effective y-motion (mm)');
+%                         subplot(1,3,3); plot(allZ); axis square; title('Object Effective z-offsets (mm)');
+%                     end
                 end
                 if rem(i,round(obj.nProj/20))==0
+                    imagesc(xRange,yRange,I); xlabel('mm'); title('Binned Image Sensor'); axis equal tight; drawnow;
                     disp(sprintf('Simulation Completion Percentage = %.0f%%',i/length(obj.theta)*100));
                 end
             end
@@ -632,34 +751,10 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 end
             end
         end
-
-        %@param double index, index of sinogram
-        function out = getSinogram(obj,index)
-            switch obj.axisDirection
-                case 'horiz'
-                    out = squeeze(obj.projections(:,index,:));
-                case 'vert'
-                    out = squeeze(obj.projections(index,:,:));
-            end
-        end
-        
-        %@param double index, index of sinogram
-        %@param StepperMotor stepperMotor
-        %@param Objective objective
-        %@param TranslationStage tStage, [] if no stage
-        function out = getShiftedSinogram(obj,index,stepperMotor,objective,tStage)
-            aorVector = (stepperMotor.xDisplacement(obj.theta)+stepperMotor.getX)/obj.getPixelSize*objective.getMagnification;
-            if ~isempty(tStage)
-                aorVector = aorVector+tStage.discreteDifference/obj.getPixelSize*objective.getMagnification;
-            end
-            switch obj.axisDirection
-                case 'horiz'
-                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(:,index,:)),aorVector);
-                case 'vert'
-                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(index,:,:)),aorVector);
-            end
-        end
-        
+    end
+    
+    %% DoF and NA methods, including simulation setup for Half and Full Depth OPT
+    methods
         % returns current object space depth of field in binned image space pixels
         %@param double n, refractive index of immersion fluid
         %@param Objective objective
@@ -690,39 +785,83 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         % @param Objective objective
         % @return double out, FWHM spatial resolution of current setup in
         % mm
-        function out = resolution(obj,objective)
-            out = obj.lambda/(2*objective.getEffNA(obj.apertureRadius));
+        function out = resolution(obj)
+            out = obj.lambda/(2*obj.objective.getEffNA(obj.apertureRadius));
         end
         
         % setup for full DoF OPT - sets the system aperture radius and
         % motor axis location
-        % @param double n, refractive index of immersion fluid
-        % @param Objective objective
-        % @param StepperMotor stepperMotor
-        function setupFullDoFOPT(obj,objective,stepperMotor,n)
+        function setupFullDoFOPT(obj)
+            n = obj.getRefractiveIndex;
+            objective = obj.objective;
+            stepperMotor = obj.stepperMotor;
             DoF = obj.getWidth*obj.getPixelSize/objective.getMagnification;
             NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;
+            
+            NA = sqrt(4*obj.lambda*n/DoF
+            
             obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;
             stepperMotor.setZ(0);
             obj.focalPlaneOffset = 0;
+            obj.focalScanRange = DoF;
         end
         
         % setup for half DoF OPT - sets the system aperture radius and
         % motor axis location
-        % @param double n, refractive index of immersion fluid
-        % @param Objective objective
-        function setupHalfDoFOPT(obj,objective,stepperMotor,n,varargin)
-            if nargin==4
+        % @param string type, either 'normal' for standard OPT DoF definition
+        % (to about 0.8 peak value) or 'traditional' for traditional
+        % DoF = n*lambda/(4*NA^2)
+        function setupHalfDoFOPT(obj,type,varargin)
+            n = obj.getRefractiveIndex;
+            objective = obj.objective;
+            stepperMotor = obj.stepperMotor;
+            if nargin==1
                 DoF = obj.getWidth*obj.getPixelSize/2/objective.getMagnification;
                 NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;
                 obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;
-            elseif nargin==5
+            elseif nargin==2
                 DoF = obj.DoF(objective,n)*obj.getPixelSize/objective.getMagnification;
             end
+            obj.focalScanRange = DoF;
             obj.focalPlaneOffset = DoF/2;
             stepperMotor.setZ(0);
-        end
+        end 
+    end
     
+    %% Sinogram methods
+    methods
+        %@param double index, index of sinogram
+        function out = getSinogram(obj,index)
+            switch obj.axisDirection
+                case 'horiz'
+                    out = squeeze(obj.projections(:,index,:));
+                case 'vert'
+                    out = squeeze(obj.projections(index,:,:));
+            end
+        end
+        
+        %@param double index, index of sinogram
+        %@param StepperMotor stepperMotor
+        %@param Objective objective
+        %@param varargin:
+            %@param TranslationStage tStage
+        function out = getShiftedSinogram(obj,index,stepperMotor,objective,varargin)
+            if nargin>4 && isa(varargin{1},'TranslationStage')
+                tStage = varargin{1}; 
+            else 
+                tStage = []; 
+            end
+            aorVector = (stepperMotor.xDisplacement(obj.theta)+stepperMotor.getX)/obj.getPixelSize*objective.getMagnification;
+            if ~isempty(tStage)
+                aorVector = aorVector+tStage.discreteDifference/obj.getPixelSize*objective.getMagnification;
+            end
+            switch obj.axisDirection
+                case 'horiz'
+                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(:,index,:)),aorVector);
+                case 'vert'
+                    out = OPTSystem.shiftSinogram(squeeze(obj.projections(index,:,:)),aorVector);
+            end
+        end
     end
     
     %% Ambiguity Function and OTFS
@@ -730,13 +869,29 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
        % generates AmbiguityFunction object, and fills value using obj and objective parameters
        % @param Objective objective
        % @param boolean varargin, display boolean, true==display 
-       function calculateAF(obj,objective,varargin)
-            obj.AF = AmbiguityFunction();
-            if nargin==3 && varargin{1}
-                obj.AF.generate(obj,objective,true)
-            else
-                obj.AF.generate(obj,objective);
-            end
+       function calculateAF(obj,varargin)  
+            switch obj.scanBoolean
+                case 0
+                    obj.AF = AmbiguityFunction();
+                    if nargin==3 && varargin{1}
+                        obj.AF.generate(obj,obj.objective,true);
+                    else
+                        obj.AF.generate(obj,obj.objective);
+                    end
+                case 1
+                    if isempty(obj.focalScanRange) || isempty(obj.scanType)
+                        error('Please set focal scan range');
+                    elseif strcmp(obj.scanType,'linear') || strcmp(obj.scanType,'sinusoid')
+                        obj.AF = AmbiguityFunctionFocalScanned();
+                        if nargin==3 && varargin{1}
+                            obj.AF.generate(obj,obj.objective,obj.focalScanRange,obj.scanType,true);
+                        else
+                            obj.AF.generate(obj,obj.objective,obj.focalScanRange,obj.scanType);
+                        end
+                    else
+                        error('Incorrect scan type must be either linear or sinusoid');
+                    end
+            end             
        end
        
        % calculates object space psf XZ profile to first zeros
@@ -890,6 +1045,53 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
     end
     
     methods (Static)
+        % gets subset of peaks, defined by user, located in rectangular
+        % box, with coordinates xmn, xmz, ymn, ymx
+        % @param double[] xPeaks
+        % @param double[] yPeaks
+        % @param double xMin, xMax, yMin, yMax
+        function [xSubset,ySubset] = peakSubset(xPeaks,yPeaks,xMin,xMax,yMin,yMax)
+            xSubset = []; ySubset = [];
+            for i=1:size(xPeaks,2)
+                x = xPeaks(:,i); y = yPeaks(:,i);
+                xInArea = x(and(and(y<yMax,y>yMin),and(x<xMax,x>xMin)));
+                yInArea = y(and(and(y<yMax,y>yMin),and(x<xMax,x>xMin)));
+                xSubset = horzcat(xSubset,xInArea);
+                ySubset = horzcat(ySubset,yInArea);
+            end
+        end
+        
+        % @param double[][] image
+        % @param double angle, in radians
+        % @param boolean useGPU, true if using CUDA enable GPU
+        function out = rotateImage(image,angle,useGPU)
+            switch useGPU
+                case 0
+                    tic
+                    p = image;
+                    x = -size(p,2)/2:size(p,2)/2-1;
+                    y = -size(p,1)/2:size(p,1)/2-1;
+                    [xx,yy]= meshgrid(x,y);
+                    xxR = xx.*cos(angle)-yy.*sin(angle)-xx(1,1);
+                    yyR = yy.*cos(angle)+xx.*sin(angle)-yy(1,1);
+                    out = interp2(p,xxR,yyR);
+                    out(isnan(out))=0;
+                    toc
+                case 1
+                    tic
+                    p = gpuArray(image);
+                    x = gpuArray(-size(p,2)/2:size(p,2)/2-1);
+                    y = gpuArray(-size(p,1)/2:size(p,1)/2-1);
+                    [xx,yy]= meshgrid(x,y);
+                    xxR = xx.*cos(angle)-yy.*sin(angle)-xx(1,1);
+                    yyR = yy.*cos(angle)+xx.*sin(angle)-yy(1,1);
+                    out = interp2(p,xxR,yyR);
+                    out(isnan(out))=0;
+                    out = gather(out);
+                    toc
+            end
+        end 
+        
         % @param double n, width of ramp filter
         function [h, nn] = ramp_flat(n)
             nn = [-(n/2):(n/2-1)]';
@@ -921,6 +1123,123 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             out(isnan(out)) = 0;
         end
         
+        %linear regression fit function, based on fminsearch (gradient
+        %descent)
+        % @param double[] xdata, ydata
+        function [ estimates,refinemodel,fit ] = fitLinear( xdata,ydata )
+             xin = xdata(and(~isnan(xdata),~isnan(ydata)));
+             yin = ydata(and(~isnan(xdata),~isnan(ydata)));
+
+            start_guesses = [(yin(end)-yin(1))/(xin(end)-xin(1)),min(yin)];
+            model = @fun;
+            refinemodel = @refine;
+            options = optimset('MaxFunEvals',500*length(start_guesses),'MaxIter',500*length(start_guesses));
+            [estimates,~,flag] = fminsearch(model,start_guesses,options);
+            [estimates,~,flag] = fminsearch(refinemodel,estimates,options);
+
+            [~,fit] = model(estimates);
+
+                function [sse,fit] = fun(params)
+                    A = params(1);
+                    B = params(2);
+
+                    fit = A.*xin+B;
+
+                    sse = nansum((fit-yin).^2);
+                end
+
+                function [sse,fit] = refine(params)
+                    A = params(1);
+                    B = params(2);
+
+                    fit = A.*xin+B;
+
+                    dif = fit-yin;
+                    err = nanstd(dif);
+
+                    dif = dif(abs(dif-nanmean(dif))<err);
+
+                    sse = nansum(dif.^2);
+                end
+
+
+        end
+        
+        % fit to sinusoid function, based on fminsearch (gradient
+        %descent). Sinusoid period 2 PI
+        % @param double[] ydata, fit = A*(sin(0:2*pi+B)+C
+        function [ estimates,refinemodel,fit ] = fitSinusoid( ydata )
+             
+            theta = linspace(0,2*pi-2*pi/length(ydata),length(ydata));
+
+            start_guesses = [(max(ydata)-min(ydata))/2,0,(max(ydata)+min(ydata))/2];
+            model = @fun;
+            refinemodel = @refine;
+            options = optimset('MaxFunEvals',500*length(start_guesses),'MaxIter',500*length(start_guesses));
+            [estimates,~,flag] = fminsearch(model,start_guesses,options);
+            [estimates,~,flag] = fminsearch(refinemodel,estimates,options);
+
+            [~,fit] = model(estimates);
+
+                function [sse,fit] = fun(params)
+                    A = params(1);
+                    B = params(2);
+                    C = params(3);
+
+                    fit = A.*sin(theta+B)+C;
+                    sse = nansum((fit-ydata).^2);
+                end
+
+                function [sse,fit] = refine(params)
+                    A = params(1);
+                    B = params(2);
+                    C = params(3);
+
+                    fit = A.*sin(theta+B)+C;
+
+                    dif = fit-ydata;
+                    err = nanstd(dif);
+
+                    dif = dif(abs(dif-nanmean(dif))<err);
+
+                    sse = nansum(dif.^2);
+                end
+
+
+        end
+        
+        % Replaces NaN values in array with linear interpolation between
+        % two closest non-nan values
+        % @param double[]xN, N-D array, interpolates across COLUMNS
+        function out = interpolateNaNValues(array)
+            out = zeros(size(array));
+            for k=1:size(array,1)
+                x1=[]; x2=[];
+                line = array(k,:);
+                while any(isnan(line))
+                    [~,x1] = find(isnan(line),1,'first');
+                    if x1==1
+                        [~,lc] = find(~isnan(line),1,'first');
+                        line(1,1:lc-1) = line(lc);
+                    else
+                        y1 = line(x1-1);
+                        lineAfter = line(x1:end);
+                        [~,x2] = find(~isnan(lineAfter),1,'first');
+                        if isempty(x2)
+                            line(x1:length(line)) = line(x1-1);
+                        else
+                            y2 = lineAfter(x2);
+                            grad = (y2-y1)./x2;
+                            inter = y2 - grad*x2;
+                            yfit = grad.*(1:x2-1)+inter;
+                            line(x1:x1+x2-2) = yfit;
+                        end
+                    end
+                end
+                out(k,:) = line;
+            end
+        end
+
         function  [x,y]=fastPeakFind(d, type,thres )
         %% ADAPTED FROM http://www.mathworks.com/matlabcentral/fileexchange/37388-fast-2d-peak-finder/content/FastPeakFind.m
 

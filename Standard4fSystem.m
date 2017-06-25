@@ -14,10 +14,18 @@ classdef Standard4fSystem < OPTSystem
         % @param string outputPath, path to save reconstructions
         % @param double mnidx, minimum index of slices to reconstruct
         % @param double mxidx, maximum index of slices to reconstruct
-        % @param StepperMotor stepperMotor, provides AoR displacement
-        % information
-        % @param Objective objective, provides magnfication information
-        function reconstruct(obj,mnidx,mxidx,stepperMotor,objective,~,tStage,displayBoolean)
+        % @param boolean displayBoolean, true to display
+        % @param varargin:
+            % @param TranslationStage tStage, optional translation stage
+            % input
+        function reconstruct(obj,mnidx,mxidx,displayBoolean,varargin)
+            stepperMotor = obj.stepperMotor;
+            objective = obj.objective;
+            if nargin>4 && isa(varargin{1},'TranslationStage');
+                tStage = varargin{1};
+            else
+                tStage = [];
+            end
             maxMinValues = dlmread(fullfile(obj.getOutputPath,'MaxMinValues.txt'));
             [xShift,zShift] = meshgrid((1:obj.getWidth)+stepperMotor.getX/obj.getPixelSize*objective.getMagnification,(1:obj.getWidth)-stepperMotor.getZ/obj.getPixelSize*objective.getMagnification);
             for index = mnidx:mxidx
@@ -26,7 +34,7 @@ classdef Standard4fSystem < OPTSystem
                 slice = interp2(slice,xShift,zShift);
                 slice(isnan(slice)) = 0;
                 if displayBoolean==1
-                    imagesc(slice); axis equal tight; colorbar; drawnow;
+                    imagesc(obj.xPixels*obj.getPixelSize,obj.zPixels*obj.getPixelSize,slice); axis equal tight; title('Image Space Recon'); colorbar; drawnow;
                 end
                 maxMinValues(index,1:3) = [min(slice(:)),max(slice(:)),index];
                 writeSlice = gather(uint16((slice-min(slice(:)))./(max(slice(:))-min(slice(:))).*65535));

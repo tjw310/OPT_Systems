@@ -37,15 +37,18 @@ classdef AmbiguityFunctionFocalScanned < handle
         % @param Boolean varargin, display boolean, true==draw new figure
         % @param string type, either 'linear' or 'sinusoid' dictates scan
         % type
-        function generate(obj,optSys,objective,zRange,type,varargin)
+        % @param varargin:
+            % @param boolean displayBoolean, true to display
+        function generate(obj,optSys,objective,focalRange,type,varargin)
             %calculates shifted ambiguity function (AF_shift) for circular pupils
             nPx = 256;
             wMax = objective.getNA*objective.getF;
-            rho = zRange/objective.getF^2;
+            rho = 2*focalRange/objective.getF^2;
             
             s_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
+            
             %adjusts t_scale based on z-range, and current depth of field
-            t_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx)*1/((zRange+4/objective.getRadiusPP^2)*wMax); 
+            t_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx)*1/((focalRange+4/objective.getRadiusPP^2)*wMax); 
             
             [s,t] = meshgrid(s_scale,t_scale);
             
@@ -92,7 +95,7 @@ classdef AmbiguityFunctionFocalScanned < handle
             obj.value = AF;
             obj.OTF = AF(nPx/2+1,:);
             
-            if nargin>1 && varargin{1}
+            if nargin>5 && varargin{1}
                 figure; imagesc(obj.tau,obj.mu,real(obj.value)); 
                 %xlabel('\tau = \lambda mfw (mm)'); %alternative labels
                 %ylabel('mw/f(z2cos\theta-x2sin\theta) (mm)');
@@ -178,7 +181,7 @@ classdef AmbiguityFunctionFocalScanned < handle
 
             DTF = obj.getDTF(optSys,objective,point,0,zOffset,false);
             
-            du = 4*objective.getEffNA(optSys.getApertureRadius)/optSys.getLambda/(size(obj.value,2)-1);
+            du = 4*objective.getNA/optSys.getLambda/(size(obj.value,2)-1);
             
             switch method
                 case 'fft'
@@ -191,13 +194,14 @@ classdef AmbiguityFunctionFocalScanned < handle
                     PSF = real(psf);
                 case 'czt'
                     bessel_zeros = AmbiguityFunction.besselzero(1,numberBesselZeros,1);
-                    x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/objective.getEffNA(optSys.getApertureRadius)/2; %chirp z max frequency
+                    x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/objective.getNA/2; %chirp z max frequency
                     m = 256;
                     psf = AmbiguityFunction.iczt_TW(DTF,du,x_ft_max,m);
-                    inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
-                    inFocusPSF(inFocusPSF<0)=inFocusPSF(inFocusPSF<0).*-1;
+                    %inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
+                    %inFocusPSF(inFocusPSF<0)=inFocusPSF(inFocusPSF<0).*-1;
                     psf(psf<0)=psf(psf<0).*-1;
-                    PSF = real(psf)./sum(real(inFocusPSF(:)));
+                    %PSF = real(psf)./sum(real(inFocusPSF(:)));
+                    PSF = real(psf);
                     scalePSF = (-1:2/m:1-2/m).*x_ft_max;
                 otherwise
                     error('Method must be either fft or czt');

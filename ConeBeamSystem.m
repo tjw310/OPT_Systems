@@ -20,15 +20,18 @@ classdef ConeBeamSystem < OPTSystem
         function out = getR(obj)
             out = obj.R/obj.getBinFactor;
         end
+        
         %@param double R, effective source-detector distance in unbinned pixels
         function setR(obj,R)
             obj.R = R;
         end
+        
         %@param double apDisp, axial aperture displacement away from pupil
         %plane in mm
         function setApertureDisplacement(obj,apDisp)
             obj.apertureDisplacement = apDisp;
         end 
+        
         %@param Objective objective, objective class provides focal length
         %and magnfication information
         function calculateApertureDisplacement(obj,objective)
@@ -36,16 +39,17 @@ classdef ConeBeamSystem < OPTSystem
         end         
     end
 
-    methods        
+    methods
+        
+        % Reconstructs obj.projections in a cone geometry using defined
+        % source-detector distance, obj.R. Tip: if the reconstructions look
+        % bad try changing the rotation directions
+        % (obj.setRotationDirection());
+        %
         % @param string outputPath, path to save reconstructions
         % @param double mnidx, minimum index of slices to reconstruct
         % @param double mxidx, maximum index of slices to reconstruct
         % @param boolean displayBoolean, true if want to display
-        % @param StepperMotor stepperMotor, class with rotation axis prop
-        % @param ObjectiveStage obStage, optional objective stage for focal
-        % plane tracking, enter [] if not used
-        % @param TranslationStage tStage, optional xy translation stage,
-        % enter [] is not used
         function reconstruct(obj,mnidx,mxidx,displayBoolean)
             if isempty(obj.getAllFilteredProj)
                 obj.filterProjections();

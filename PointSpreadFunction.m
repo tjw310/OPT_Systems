@@ -87,7 +87,7 @@ classdef PointSpreadFunction < handle
     
     methods
         % @param boolean varargin, display boolean, true==new figure
-        function calculateFWHM(obj,varargin)
+        function out = calculateFWHM(obj,varargin)
             if ~isempty(obj.value) && ~isempty(obj.xScale) && ~isempty(obj.yScale)
                 if nargin==2 && varargin{1}
                     [obj.FWHM,gaussianFit] = PointSpreadFunction.fit2DGaussian(obj.value,obj.xScale,obj.yScale,true);
@@ -96,8 +96,10 @@ classdef PointSpreadFunction < handle
                 end
                 figure; plot(obj.xScale,obj.value(size(obj.value,1)/2+1,:)); hold on; plot(obj.xScale,gaussianFit(size(obj.value,1)/2+1,:)); 
                 xlabel('x (mm)'); ylabel('Intensity'); hold off;  title('1D profile through fit');drawnow;
+                out = obj.getFWHM;
             else
                 error('Please set PSF value and scales before calculating fwhm');
+                out = [];
             end
         end
         function rampFilter(obj)

@@ -758,23 +758,26 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         % returns current object space depth of field in binned image space pixels
         %@param double n, refractive index of immersion fluid
         %@param Objective objective
-        function out = DoF(obj,objective)
-            DoFmm = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
-            out = DoFmm*objective.getMagnification/obj.getPixelSize;
+        function out = DoF(obj,varargin)
+            if nargin==2 && strcmp(varargin{1},'zeros')
+                out = obj.objective.getEffTradDoF(obj.lambda,obj.apertureRadius,obj.n);
+            else
+                out = obj.objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
+            end
+            out = out*obj.objective.getMagnification/obj.getPixelSize;
         end
         
         % returns current object space depth of field in mm
-        %@param double n, refractive index of immersion fluid
-        %@param Objective objective
-        function out = DoFinMM(obj,objective)
-            out = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
-        end
-        
-        
-        %returns traditional DoF definition: DoF = n*lambda/(4*NA^2)
-        function out = traditionalDoF(obj,objective)
-            out = objective.getEffTradDoF(obj.lambda,obj.apertureRadius,obj.n);
-        end
+        %@param varargin:
+                % @param string 'zeros' for DoF to traditional zeros, 
+                          % default to standard OPT dof.
+        function out = DoFinMM(obj,varargin)
+            if nargin==2 && strcmp(varargin{1},'zeros')
+                out = obj.objective.getEffTradDoF(obj.lambda,obj.apertureRadius,obj.n);
+            else
+                out = obj.objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.n);
+            end
+        end      
         
         % returns current system object space NA
         %@param Objective objective
@@ -791,13 +794,15 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         
         % setup for full DoF OPT - sets the system aperture radius and
         % motor axis location
+        % @param varargin:
+            % @string 'zeros' sets NA to traditional zeros 
         function setupFullDoFOPT(obj,varargin)
             n = obj.getRefractiveIndex;
             objective = obj.objective;
             stepperMotor = obj.stepperMotor;
-            DoF = obj.getWidth*obj.getPixelSize/objective.getMagnification
+            DoF = obj.getWidth*obj.getPixelSize/objective.getMagnification;
             NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;
-            if nargin>1 && strcmp(varargin{1},'traditional');
+            if nargin>1 && strcmp(varargin{1},'zeros');
                 NA = sqrt(4*obj.lambda*n/DoF);
             end
             obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;
@@ -869,69 +874,65 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
        % @param Objective objective
        % @param boolean varargin, display boolean, true==display 
        function calculateAF(obj,varargin)  
-            switch obj.scanBoolean
-                case 0
-                    obj.AF = AmbiguityFunction();
-                    if nargin==3 && varargin{1}
-                        obj.AF.generate(obj,obj.objective,true);
-                    else
-                        obj.AF.generate(obj,obj.objective);
-                    end
-                case 1
-                    if isempty(obj.focalScanRange) || isempty(obj.scanType)
-                        error('Please set focal scan range');
-                    elseif strcmp(obj.scanType,'linear') || strcmp(obj.scanType,'sinusoid')
-                        obj.AF = AmbiguityFunctionFocalScanned();
-                        if nargin==3 && varargin{1}
-                            obj.AF.generate(obj,obj.objective,obj.focalScanRange,obj.scanType,true);
-                        else
-                            obj.AF.generate(obj,obj.objective,obj.focalScanRange,obj.scanType);
-                        end
-                    else
-                        error('Incorrect scan type must be either linear or sinusoid');
-                    end
-            end             
+            if obj.getScanBoolean==1
+                if isempty(obj.focalScanRange) || isempty(obj.scanType)
+                    error('Please set focal scan range');
+                elseif ~strcmp(obj.scanType,'linear') && ~strcmp(obj.scanType,'sinusoid')
+                    error('Incorrect scan type must be either linear or sinusoid'); 
+                end
+            end
+            obj.AF = AmbiguityFunction();
+            if nargin==3 && varargin{1}
+                obj.AF.generate(obj,obj.objective,true);
+            else
+                obj.AF.generate(obj,obj.objective);
+            end
        end
        
        % calculates object space psf XZ profile to first zeros
        % @oaram Objective objective
        % @param String limit, either 'dof' or 'zeros' - extent of z range
-       % either to 2x definition of depth of field or to the first zeros
+       % either to 2x definition of depth of field or to the 2*(first
+       % zeros)
        % @param PointObject varargin, optional point object to probe system
        % at objects x,y coordinates
        % @return double[][], xzPSF
-       function [xzPSF,dispScale,zRange] = xzPSF(obj,objective,limit,varargin)
-           if nargin==3
+       function [xzPSF,dispScale,zRange] = xzPSF(obj,limit,varargin)
+           if nargin==2
                object = PointObject(0,0,0);
-           elseif nargin~=4
+           elseif nargin~=3
                error('Incorrect number of arguments');
            else
                object = PointObject(varargin{1}.getX,varargin{1}.getY,0);
            end
-           obj.calculateAF(objective);
+           obj.calculateAF();
            numberBesselZeros = 5;
-           switch limit
-               case 'zeros'
-                   zLimit = 2*obj.getLambda/(objective.getEffNA(obj.getApertureRadius)^2);
-               case 'dof'
-                   zLimit = objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,1);
-               otherwise
-                   error('Limit must be zeros or dof');
-           end
+           if isa(limit,'char')
+               switch limit
+                   case 'zeros'
+                       zLimit =  2*2*obj.getLambda/(obj.objective.getEffNA(obj.getApertureRadius)^2)*obj.getRefractiveIndex;
+                   case 'dof'
+                       zLimit = obj.objective.getEffDoF(obj.pxSz,obj.lambda,obj.apertureRadius,obj.getRefractiveIndex);
+               end
+           elseif isa(limit,'double') || isa(limit,'single')
+               zLimit = limit;
+           else 
+               error('Limit must be zeros or dof or a number');
+            end
            zRange = linspace(-zLimit,zLimit,256);
            zOffset = obj.getFocalPlaneOffset;
-           psfFocus = obj.AF.getPSF(obj,objective,object,numberBesselZeros,zOffset,'czt');
+           psfFocus = obj.AF.getPSF(obj,obj.objective,object,numberBesselZeros,zOffset,'czt');
            [~,dispScale,rowIndex] = psfFocus.xProfile;
-           dispScale = dispScale/objective.getMagnification; %switch to object-space scale
+           dispScale = dispScale/obj.objective.getMagnification; %switch to object-space scale
            for i=1:length(zRange)
                point = PointObject(object.getX,object.getY,zRange(i));
-               psfObject = obj.AF.getPSF(obj,objective,point,numberBesselZeros,zOffset,'czt');
+               psfObject = obj.AF.getPSF(obj,obj.objective,point,numberBesselZeros,zOffset,'czt');
                sysType = class(obj);
                if strcmp(sysType,'ConeBeamSystem')
                    if isempty(obj.getApertureDisplacement)
-                       obj.calculateApertureDisplacement(objective); 
+                       obj.calculateApertureDisplacement(obj.objective); 
                    end
-                    xzPSF(i,:) = interp1(psfObject.getXScale/objective.getMagnification,psfObject.rowProfile(rowIndex),dispScale);
+                    xzPSF(i,:) = interp1(psfObject.getXScale/obj.objective.getMagnification,psfObject.rowProfile(rowIndex),dispScale);
                elseif strcmp(sysType,'Standard4fSystem')
                    xzPSF(i,:) = psfObject.rowProfile(rowIndex);
                end
@@ -939,8 +940,8 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 disp(sprintf('xzPSF completion percentage: %.1f%%',i/length(zRange)*100));
                end
            end
-           figure; imagesc(dispScale,zRange,xzPSF./max(xzPSF(:))); xlabel('x (mm)'); ylabel('z (mm)'); title('Object space PSF axial profile'); axis square;
-           figure; plot(zRange,xzPSF(:,size(xzPSF,2)/2+1)./max(xzPSF(:))); 
+           figure; imagesc(dispScale,zRange,xzPSF); xlabel('x (mm)'); ylabel('z (mm)'); title('Object space PSF axial profile'); axis square;
+           figure; plot(zRange,xzPSF(:,size(xzPSF,2)/2+1)); 
        end                      
     end
 

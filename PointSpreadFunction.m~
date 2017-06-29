@@ -130,34 +130,31 @@ classdef PointSpreadFunction < handle
         
         %method to calculate resolution by shifting one of a pair of psfs
         %and looking for a peak prominence of 1/2 maximum
-        function out = resolution(obj)          
-            psfLine = obj.value(size(obj.value,1)/2+1,:);
-            halfMaximum = max(obj.value(:))/2;
+        function out = resolution(obj)
+            
+            
+            
+            halfMaximum = max(psf.value(:))/2;
             start_guesses = 0;
             
-            model = @fun;
+            model = @optimisationFunction;
             options = optimset('MaxFunEvals',2000*length(start_guesses),'MaxIter',2000*length(start_guesses));
             estimates = fminsearch(model,start_guesses,options); 
-            [~,sepPeaks] = model(estimates);
+            
             out = estimates(1);
             
-            figure; plot(obj.xScale,sepPeaks); xlabel('mm'); title(sprintf('Image-Space Resolution by Peak-Seperation = %.4fmm',out)); drawnow;
-            
-            function [sse,C] = fun(params)
+            function sse = optimistationFunction(params)
                 shift = params(1);
                 
-                A = interp1(obj.xScale,psfLine,obj.xScale+shift/2);
-                B = interp1(obj.xScale,psfLine,obj.xScale-shift/2);
+                A = psf.value(size(psf.value,1)/2+1,:);
+                B = interp1(A,(1:length(A))+shift);
                 
-                % This method provides true resolution if defined by
-                % peak-dip = 0.5 peak height
                 C = A+B;
-                % This method provides the conventional answer (i.e 1/abbe)
-                C = max(A,B);
+                [~,~,~,prominences] = findpeaks(C);
                 
-                sse = sum((C(length(psfLine)/2+1)-halfMaximum).^2);
+                [~,c] = find((pronminences-halfMaximum)==min(pronminences-halfMaximum));
                 
-                %plot(obj.xScale,C); drawnow;
+                sse = sum((prominences(c)-halfMaximum).^2);
                 
                 
             end

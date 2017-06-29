@@ -37,11 +37,21 @@ classdef AmbiguityFunction < handle
         function generate(obj,optSys,objective,varargin)
             %calculates shifted ambiguity function (AF_shift) for circular pupils
             nPx = 256;
-            wMax = objective.getEffNA(optSys.getApertureRadius)*objective.getF;
-           
-            s_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx);
-            %adjusts t_scale based on z-range, and objective depth of field
-            t_scale = 2*wMax.*(-nPx/2:nPx/2-1)/(0.5*nPx)*2/(4/objective.getRadiusPP); 
+            
+            s_scale = 2*objective.getRadiusPP.*(-nPx/2:nPx/2-1)/(0.5*nPx);
+            t_scale = objective.getRadiusPP.*(-nPx/2:nPx/2-1)/(0.5*nPx);
+
+            %fourier aperture limits + options for focal-scannned
+            if optSys.getScanBoolean==1
+                focalRange = optSys.getFocalScanRange;
+                rho = focalRange/objective.getF^2;
+                wMax = objective.getNA*objective.getF;
+                %t_scale = t_scale./focalRange*optSys.DoFinMM;
+                
+            else
+                wMax = objective.getEffNA(optSys.getApertureRadius)*objective.getF;
+            end
+
             
             [s,t] = meshgrid(s_scale,t_scale);
             
@@ -49,11 +59,11 @@ classdef AmbiguityFunction < handle
             dt = (max(t_scale)-min(t_scale))/nPx;
             mu_max = 1/(2*dt);
             obj.mu = mu_max.*(-nPx/2:nPx/2-1)/(0.5*nPx);
-
+            
             r1 = sqrt(t.^2+s.^2);
-            Norm = zeros(size(s));
-            Norm(r1<=wMax) = 1;
-            Norm = sum(sum(Norm.^2));
+            normFactor = zeros(size(s));
+            normFactor(r1<=wMax) = 1;
+            normFactor = sum(sum(normFactor.^2));
             count = 1;
             AF = zeros(length(t),length(obj.tau));
 
@@ -63,13 +73,32 @@ classdef AmbiguityFunction < handle
                 r2 = sqrt((t-dt/2).^2+s.^2);
                 P1(r1<=wMax) = 1;
                 P2(r2<=wMax) = 1;
-                A = fftshift(fft(ifftshift(P1.*P2)))./Norm;
+                
+                if optSys.getScanBoolean==1 && rho~=0
+                    gamma = dt/optSys.getLambda.*t/optSys.getRefractiveIndex;
+                    switch optSys.getScanType
+                        case 'linear'
+                            weight = sinc(gamma*rho);
+                        case 'sinusoid'
+                            weight = besselj(0,pi*gamma*rho);
+                        otherwise
+                            error('Scan type must be linear or sinusoidal');
+                    end
+                    product = P1.*P2.*weight;
+                else
+                    product = P1.*P2;
+                end
+                
+                A = fftshift(fft(ifftshift(product)))./normFactor;
                 AF(:,count) = sum(A,2);
+
                 count = count+1;
-                if rem(count,round(length(obj.tau)/20))==0
+                if rem(count,round(length(obj.tau)/5))==0
                     disp(sprintf('AF Generation Percentage Complete: %.0f%%',(count-1)/length(obj.tau)*100));
                 end
             end
+            
+            AF=AF./max(AF(:));
             
             obj.value = AF;
             
@@ -115,14 +144,12 @@ classdef AmbiguityFunction < handle
             
             [tau2D,mu2D] = meshgrid(obj.tau,obj.mu);
             optSysType = class(optSys);
+            zPosition = z*cos(theta)-x*sin(theta)-zOffset;
             switch optSysType
                 case 'Standard4fSystem'
-                    zPosition = z*cos(theta)-x*sin(theta)-zOffset;
-                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*zPosition;
+                    muQuery = obj.tau./(optSys.getLambda*optSys.getRefractiveIndex*objective.getF^2)*zPosition;
                 case {'ConeBeamSystem','SubVolumeSystem'}
-                    zPosition = z*cos(theta)-x*sin(theta)-zOffset;
-                    magAxial = optSys.magnifcationAtDepth(objective,zPosition);
-                    muQuery = obj.tau./(optSys.getLambda*objective.getF^2)*magAxial/objective.getMagnification*zPosition;
+                    muQuery = obj.tau./(optSys.getLambda*optSys.getRefractiveIndex*objective.getF^2)*magAxial/objective.getMagnification*zPosition;
                 otherwise
                     error('OPT system must be either: Standard4fSystem of ConeBeamSystem class');
             end
@@ -134,6 +161,7 @@ classdef AmbiguityFunction < handle
             DTF(isnan(DTF))=0;
             
             if nargin==7 && varargin{1}
+                obj.show; hold on; plot(obj.tau,muQuery,'r'); hold off; drawnow;
                 figure;
                 imagesc(obj.tau./(optSys.getLambda*objective.getF),obj.tau./(optSys.getLambda*objective.getF),real(DTF)); 
                 title('Defocussed Transfer Function'); xlabel('w (mm^{-1})'); ylabel('w (mm^{-1})'); axis square; drawnow;
@@ -160,7 +188,15 @@ classdef AmbiguityFunction < handle
 
             DTF = obj.getDTF(optSys,objective,point,0,zOffset,false);
             
-            du = 4*objective.getEffNA(optSys.getApertureRadius)/optSys.getLambda/(size(obj.value,2)-1);
+            %OTF = obj.getDTF(optSys,objective,PointObject(0,0,0),0,zOffset,false);
+            
+            if optSys.getScanBoolean==0
+                NA = objective.getEffNA(optSys.getApertureRadius);
+            else
+                NA = objective.getNA;
+            end
+            
+            du = 4*NA/optSys.getLambda/(size(obj.value,2)-1);
             
             switch method
                 case 'fft'
@@ -173,10 +209,9 @@ classdef AmbiguityFunction < handle
                     PSF = real(psf);
                 case 'czt'
                     bessel_zeros = AmbiguityFunction.besselzero(1,numberBesselZeros,1);
-                    x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/objective.getEffNA(optSys.getApertureRadius)/2; %chirp z max frequency
+                    x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/NA/2; %chirp z max frequency
                     m = 256;
                     psf = AmbiguityFunction.iczt_TW(DTF,du,x_ft_max,m);
-                    %inFocusPSF = AmbiguityFunction.iczt_TW(obj.OTF,du,x_ft_max,m); %in-focus PSF for normalisation
                     %inFocusPSF(inFocusPSF<0)=inFocusPSF(inFocusPSF<0).*-1;
                     psf(psf<0)=psf(psf<0).*-1;
                     %PSF = real(psf)./sum(real(inFocusPSF(:)));

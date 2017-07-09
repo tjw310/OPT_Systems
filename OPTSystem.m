@@ -376,6 +376,13 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         % function to crop projections around centre
         function cropProjections(obj,cropedSize)
             szProj = size(obj.projections);
+            if cropedSize(1)>szProj(1)
+                cropedSize(2) = szProj(1);
+            end
+            if cropedSize(2)>szProj(2)
+                cropedSize(2) = szProj(2);
+            end
+            
             idxRow = (szProj(1)-cropedSize(1))/2+1:(szProj(1)+cropedSize(1))/2;
             idxCol = (szProj(2)-cropedSize(2))/2+1:(szProj(2)+cropedSize(2))/2;
             for k=1:obj.nProj
@@ -610,7 +617,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                         im = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(i).name))))));
                         im_name = strsplit(im_dir(i).name,'.');
                         index = str2double(im_name{1});
-                        im = im./65535*((maxMinValues(index,2)-maxMinValues(index,1))+maxMinValues(index,1));
+                        im = im./65535*(maxMinValues(index,2)-maxMinValues(index,1))+maxMinValues(index,1);
                         im = uint16((im-minimumValue)./(maximumValue-minimumValue).*65535);
                        % imagesc(im); axis equal tight; caxis([0,2^16-1]); drawnow; pause(.3);
                         imwrite(im,strcat(fullfile(obj.getOutputPath,num2str(index,'%05d')),'.tiff'));
@@ -622,6 +629,67 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             end
         end
         
+        % use after normalistion to select slice and attempt to find PSF
+        % (for bead images)
+        function [minFWHM,maxFWHM,fieldRadius,fieldAngle] = findBeadResolution(obj,index)
+        im_dir = dir(fullfile(obj.outputPath,'*.tif'));
+            if isempty(im_dir)
+                im_dir = dir(fullfile(obj.outputPath,'*.tiff'));
+            end
+        im = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(index).name))))));
+            if max(im(:))>4*nanstd(im(:))
+                [x,y] = OPTSystem.fastPeakFind(im,1,4*nanstd(im(:)));
+                sZ = 128;
+                for k=1:length(x)
+                    r = y(k); c = x(k);
+                    psfScale = (-sZ/2:sZ/2-1)*obj.getPixelSize/obj.objective.getMagnification;
+                    count = 1;
+                    for j=-sZ/2:sZ/2-1
+                        im2 = single(imread(strcat(fullfile(obj.outputPath,char(cellstr(im_dir(index+j).name))))));
+                        rowIdx = r-sZ/2:r+sZ/2-1;
+                        colIdx = c-sZ/2:c+sZ/2-1;
+                        rowIdx(rowIdx<1) = 1; colIdx(colIdx<1)=1;
+                        rowIdx(rowIdx>size(im2,1))=size(im2,1);
+                        colIdx(colIdx>size(im2,2))=size(im2,2);
+                        psfIm = im2(rowIdx,colIdx);
+                        P(:,:,count) = psfIm; count = count+1;
+                    end
+                    idx = find(P==max(P(:)));
+                    sliceNo = floor(idx/(size(P,1)*size(P,2)))+1;
+                    reconPSF = PointSpreadFunction(P(:,:,sliceNo),psfScale,psfScale);
+                    reconPSF.maxMinProfiles();
+                    minFWHM = reconPSF.getMinFWHM;
+                    maxFWHM = reconPSF.getMaxFWHM;
+                    sqrt((r-size(im,1)/2+1).^2+(c-size(im,2)/2+1).^2)
+                    fieldRadius = sqrt((r-size(im,1)/2).^2+(c-size(im,2)/2).^2).*obj.getPixelSize/obj.objective.getMagnification;
+                    fieldAngle = atan2((r-size(im,1)/2),(c-size(im,1)/2));
+                    
+                    contourScale = linspace(min(P(:)),max(P(:)),25);
+                    [x,y,z] = meshgrid(psfScale);
+                    figure; contourslice(x,y,z,P,0,[],0,contourScale); axis equal; title(sprintf('Field Radius = %.3fmm, Field Angle = %.0f°',fieldRadius,fieldAngle/pi*180)); drawnow;
+                    figure; plot(reconPSF.getXScale,reconPSF.getMaxProfile); hold on;
+                    plot(reconPSF.getXScale,reconPSF.getMinProfile); legend(sprintf('FWHM = %.2fµm',reconPSF.getMaxFWHM*10^3),sprintf('FWHM = %.2fµm',reconPSF.getMinFWHM*10^3)); 
+                    xlabel('Scale (mm)'); ylabel('Relative Intensity'); title(sprintf('Field Radius = %.3fmm, Field Angle = %.0f°',fieldRadius,fieldAngle/pi*180));drawnow;
+                end
+            end
+        end
+        
+        % find all PSF's in recon volume
+        function getAllReconPSF(obj)
+            if exist(fullfile(obj.outputPath,'MaxMinValues.txt'))~=2
+                error('Please reconstruct projections first');
+            else
+                maxMinValues = dlmread(fullfile(obj.outputPath,'MaxMinValues.txt'));
+            end
+            [~,lcs,~,~] = findpeaks(maxMinValues(:,2),'minpeakheight',nanmean(maxMinValues(:,2))+0.5*nanstd(maxMinValues(:,2)));
+            for i=1:length(lcs)
+                idx = lcs(i);
+                [minFWHMs(i),maxFWHMs(i),fieldRadii(i),fieldAngles(i)]=obj.findBeadResolution(idx);
+            end
+            figure; scatter(fieldRadii,minFWHMs./maxFWHMs); axis square;
+            figure; scatter(fieldRadii,minFWHMs); hold on; scatter(fieldRadii,maxFWHMs); hold off; axis square; drawnow; 
+        end
+            
         %% Simulation
         
         % simulates projections
@@ -786,6 +854,97 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             figure; mesh(fractionDoF,reconPSF(1).getXScale,minLines); ylabel('x-profile (mm)'); xlabel('Fraction of Zeros DoF'); zlabel('Relative Intensity'); title('Minimum Reconstructed Resolution Field Profile');
         end
                 
+    end
+    
+    %% calibration methods
+    methods
+        % shifts projections based on calibration into maximum intensity
+        % projection
+        % @param varargin, 'new' to re-calculate corrected MIP
+        function findAoRAngle(obj,varargin)
+            mip = obj.getMIP;
+            
+             [x,y]=OPTSystem.fastPeakFind(mip,1,nanmean(mip(:)));
+             figure; imagesc(mip); hold on; scatter(x,y,'r'); hold off;
+            xMin = input('Enter min x value:');
+            yMin = input('Enter min y value:');
+            xMax = input('Enter max x value:');
+            yMax = input('Enter min y value:');
+            
+            for k=1:obj.getNProj
+                p = obj.getProjection(k);
+                p = p(yMin:yMax,xMin:xMax);
+                p(isnan(p)) = nanmean(p(:));
+                [x,y]=OPTSystem.fastPeakFind(p,1,nanmean(p(:)));
+                xSub(k) = nanmean(x); ySub(k) = nanmean(y);
+                if rem(k,obj.getNProj/10)==0
+                    disp(sprintf('peak finding completion: %.1f%%',k/obj.getNProj*100));
+                end
+            end
+            xSub(xSub==0)=NaN;  ySub(ySub==0)=NaN;
+            
+            [linearFitVariables,~,fit] = OPTSystem.fitLinear(xSub,ySub);
+            figure; scatter(xSub,ySub); hold on; 
+            plot(xSub(~isnan(xSub)),fit); hold off;
+            angle = -atan(linearFitVariables(1));       
+            
+            obj.stepperMotor.setAngle(angle);
+            
+            rot = OPTSystem.rotateImage(mip,-angle,obj.getUseGPU);
+            figure; imagesc(rot);
+        end
+        
+        %estimates motor motion from subset of peaks found in raw
+        %projections
+        function estimateMotorMotion(obj)
+            mip = obj.getMIP;
+            
+             [x,y]=OPTSystem.fastPeakFind(mip,1,nanmean(mip(:)));
+             figure; imagesc(mip); hold on; scatter(x,y,'r'); hold off;
+            xMin = input('Enter min x value:');
+            yMin = input('Enter min y value:');
+            xMax = input('Enter max x value:');
+            yMax = input('Enter min y value:');
+            
+            for k=1:obj.getNProj
+                p = obj.getProjection(k);
+                p = p(yMin:yMax,xMin:xMax);
+                p(isnan(p)) = nanmean(p(:));
+                [x,y]=OPTSystem.fastPeakFind(p,1,nanmean(p(:)));
+                xSub(k) = nanmean(x); ySub(k) = nanmean(y);
+                if rem(k,obj.getNProj/10)==0
+                    disp(sprintf('peak finding completion: %.1f%%',k/obj.getNProj*100));
+                end
+            end
+            xSub(xSub==0)=NaN;  ySub(ySub==0)=NaN;
+            
+            if obj.getRotBool==0
+                rotSub = TranslationStage.rotateXYvector([xSub;ySub],obj.stepperMotor.getAngle);
+            else
+                rotSub = [xSub;ySub];
+            end
+            
+            [estimates,~,fit]= OPTSystem.fitSinusoid(rotSub(1,:));
+            
+            centre = estimates(3)-size(mip,2)/2+xMin;
+            shift = centre*obj.getPixelSize/obj.objective.getMagnification;
+            excessXMotion = (rotSub(1,:)-fit)*obj.getPixelSize/obj.objective.getMagnification;
+            excessYMotion = (rotSub(2,:)-nanmean(rotSub(2,:))).*obj.getPixelSize/obj.objective.getMagnification;
+            
+            nanIndexes = abs(excessXMotion)>(nanmean(excessXMotion)+2*nanstd(excessXMotion));
+            excessXMotion(nanIndexes)=NaN;
+            excessYMotion(nanIndexes)=NaN;
+            
+            interpMotion = OPTSystem.interpolateNaNValues([excessXMotion;excessYMotion]);
+            
+            obj.stepperMotor.setX(-shift);
+            obj.stepperMotor.setXMotion(interpMotion(1,:),obj.getNProj);
+            
+            figure; scatter(1:size(rotSub,2),rotSub(1,:)); hold on; plot(fit); hold off; drawnow;
+            figure; subplot(1,2,1); plot(interpMotion(1,:)); hold on; plot(excessXMotion); hold off; ylabel('(mm)'); xlabel('Projection Number');  title('Excess X-Motion'); axis square;
+            subplot(1,2,2); plot(interpMotion(2,:)); hold on; plot(excessYMotion); hold off; ylabel('(mm)'); xlabel('Projection Number');  title('Excess Y-Motion'); axis square;
+        end
+        
     end
     
     %% DoF and NA methods, including simulation setup for Half and Full Depth OPT

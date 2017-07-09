@@ -272,7 +272,7 @@ classdef SubVolumeSystem < ConeBeamSystem
                     error('Invalid type');
             end
         end  
-                
+        
         % shifts projections based on calibration into maximum intensity
         % projection
         % @param varargin, 'new' to re-calculate corrected MIP

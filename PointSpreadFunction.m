@@ -246,7 +246,9 @@ classdef PointSpreadFunction < handle
                 line = interp2(x2D,z2D,obj.value,xThetaQuery,zThetaQuery);
                 line90 = interp2(x2D,z2D,obj.value,xTheta90Query,zTheta90Query);
 
-                sse = 1./sum((line-line90).^2);
+               % sse = 1./sum((line-line90).^2);
+                
+                sse = 1./nansum((nanstd(line)-nanstd(line90)).^2);
                 
             end
         end

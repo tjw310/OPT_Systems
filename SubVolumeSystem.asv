@@ -272,7 +272,7 @@ classdef SubVolumeSystem < ConeBeamSystem
                     error('Invalid type');
             end
         end  
-                
+        
         % shifts projections based on calibration into maximum intensity
         % projection
         % @param varargin, 'new' to re-calculate corrected MIP
@@ -350,12 +350,13 @@ classdef SubVolumeSystem < ConeBeamSystem
             
             if nnz(obj.objectiveStage.getMotion)~=0 &&  nnz(obj.translationStage.getMotion)==0
                 if ~isempty(obj.translationStage.getMagAoR)
-                    idealTranslation = fit*obj.getPixelSize/obj.translationStage.getMagAoR;
+                    idealTranslation = (fit-estimates(3))*obj.getPixelSize/obj.translationStage.getMagAoR;
                 else
-                    idealTranslation = fit*obj.getPixelSize/obj.objective.getMagnification;
+                    idealTranslation = (fit-estimates(3))*obj.getPixelSize/obj.objective.getMagnification;
                 end
-                obj.translationStage.setMotion([-idealTranslation;zeros(1,length(fit))]);
+                obj.translationStage.setMotion([idealTranslation;zeros(1,length(fit))]);
                 obj.translationStage.setFullMotion([idealTranslation;zeros(1,length(fit))]);
+                obj.translationStage.clearMotionPixels;
             end
             
             centre = estimates(3)-size(mip,2)/2+xMin;

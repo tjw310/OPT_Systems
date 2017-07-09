@@ -243,6 +243,9 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
         function out = getFocalPlaneOffset(obj)
             out = obj.focalPlaneOffset;
         end
+        function setFocalPlaneOffset(obj,offset)
+            obj.focalPlaneOffset = offset;
+        end
         function setRotBool(obj,bool)
             obj.rotatedBool = bool;
         end
@@ -696,7 +699,7 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                     end
                     
                     
-                    [~,psf,xScale,yScale] = obj.AF.getPSF(obj,objective,rotObject,5,zOffset,'czt');
+                    [~,psf,xScale,yScale] = obj.AF.getPSF(obj,objective,rotObject,10,zOffset,'czt');
                     
                     if obj.useGPU==1
                         [psfX,psfY] = meshgrid(gpuArray(xScale),gpuArray(yScale));
@@ -751,6 +754,38 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
                 end
             end
         end
+        
+        % simulates reconstructed point spread function across the field
+        % @param int n, number of query points
+        function [reconPSF,maxLines,minLines,maxFWHM,minFWHM] = simulateReconstruction(obj,n)
+            fieldMax = obj.getWidth*obj.getPixelSize/obj.objective.getMagnification/2;
+            fieldPos = linspace(0,fieldMax,n);
+            zOffset = obj.getFocalPlaneOffset;
+            for i=1:n
+                ob = PointObject(0,0,fieldPos(i));
+                currentReconPSF = obj.AF.getReconPSF(obj,obj.objective,ob,10,zOffset);
+                reconPSF(i) = currentReconPSF;
+                maxLines(:,i) = currentReconPSF.getMaxProfile;
+                minLines(:,i) = currentReconPSF.getMinProfile;
+                maxFWHM(i) = currentReconPSF.getMaxFWHM;
+                minFWHM(i) = currentReconPSF.getMinFWHM;
+                sumValues(i) = nansum(nansum(currentReconPSF.getValue));
+                if rem(i,round(n/20))==0
+                    disp(sprintf('Simulated Reconstruction Completion: %.0f%%',i/n*100));
+                end
+            end
+            zerosDoF = obj.DoFinMM('zeros');
+            fractionDoF = fieldPos./zerosDoF;
+            figure; plot(fractionDoF,sumValues); axis square; xlabel('Fraction of Zeros DoF'); ylabel('Integrated Intensity');
+            figure; plot(0.5./fractionDoF,minFWHM./maxFWHM); axis square; xlabel('R_{DoF}'); ylabel('R_{aniso}');
+            figure; plot(sqrt(0.5./fractionDoF),minFWHM./maxFWHM); axis square; xlabel('R_{FWHM}'); ylabel('R_{aniso}');
+            figure; plot(fractionDoF,minFWHM./maxFWHM); axis square; xlabel('Fraction of Zeros DoF'); ylabel('Ratio of Min:Max FWHM Resolution');
+            figure; plot(fractionDoF,minFWHM./minFWHM(1)); axis square; xlabel('Fraction of Zeros DoF'); ylabel('Fractional Change in Resolution');
+            figure; plot(fractionDoF,maxFWHM./maxFWHM(2)); axis square; xlabel('Fraction of Zeros DoF'); ylabel('Fractional Change in Resolution');
+            figure; mesh(fractionDoF,reconPSF(1).getXScale,maxLines); ylabel('x-profile (mm)'); xlabel('Fraction of Zeros DoF'); zlabel('Relative Intensity'); title('Maximum Reconstructed Resolution Field Profile');
+            figure; mesh(fractionDoF,reconPSF(1).getXScale,minLines); ylabel('x-profile (mm)'); xlabel('Fraction of Zeros DoF'); zlabel('Relative Intensity'); title('Minimum Reconstructed Resolution Field Profile');
+        end
+                
     end
     
     %% DoF and NA methods, including simulation setup for Half and Full Depth OPT
@@ -820,9 +855,9 @@ classdef (Abstract) OPTSystem < handle & matlab.mixin.Copyable
             n = obj.getRefractiveIndex;
             objective = obj.objective;
             stepperMotor = obj.stepperMotor;
-            DoF = obj.getWidth*obj.getPixelSize/2/objective.getMagnification;
+            DoF = obj.getWidth*obj.getPixelSize/objective.getMagnification/2;
             NA = sqrt(obj.lambda*n/DoF+(n*obj.pxSz/objective.getMagnification/2/DoF)^2)+n*obj.pxSz/objective.getMagnification/2/DoF;           
-            if nargin>1 && strcmp(varargin{1},'traditional');
+            if nargin>1 && strcmp(varargin{1},'zeros');
                 NA = sqrt(4*obj.lambda*n/DoF);
             end
             obj.apertureRadius = NA/objective.getNA*objective.getRadiusPP;

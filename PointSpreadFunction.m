@@ -9,6 +9,11 @@ classdef PointSpreadFunction < handle
         yScale %y-scale in mm
         FWHM %full-width half maximum spatial resolution in mm
         rampValue %double[][] 2D array of ramp filtered PSF
+        
+        maxProfile %profile through PSF that maximises resoltuion
+        minProfile %profile through PSF that minimises resolution
+        maxFWHM % max FWHM through anisotropic PSF
+        minFWHM %min FWHM through anisotropic PSF
     end
     
     methods %constructor and get/set
@@ -82,6 +87,19 @@ classdef PointSpreadFunction < handle
         function out = colProfile(obj,colIndex)
             out = obj.value(:,colIndex);
         end
+
+        function out = getMinProfile(obj)
+            out = obj.minProfile;
+        end
+        function out = getMaxProfile(obj)
+            out = obj.maxProfile;
+        end
+        function out = getMaxFWHM(obj)
+            out = obj.maxFWHM;
+        end
+        function out = getMinFWHM(obj)
+            out = obj.minFWHM;
+        end
         
     end
     
@@ -130,8 +148,23 @@ classdef PointSpreadFunction < handle
         
         %method to calculate resolution by shifting one of a pair of psfs
         %and looking for a peak prominence of 1/2 maximum
-        function out = resolution(obj)          
-            psfLine = obj.value(size(obj.value,1)/2+1,:);
+        % @param varargin:
+            % @param double angle, angle of line through 2D PSF to find
+            % resolution
+        function [out,psfLine] = resolution(obj,varargin)
+            [r,c] = find(obj.value==max(obj.value(:)));
+            if nargin==1
+                psfLine = obj.value(r,:);
+            else
+                angle = varargin{1};
+                x = (1:size(obj.value,2))-c; z = (1:size(obj.value,1))-r;
+                [x2D,z2D] = meshgrid(x,z);
+                xR = x2D.*cos(angle)+z2D.*sin(angle);
+                zR = z2D.*cos(angle)-x2D.*sin(angle);
+                xQuery = xR(length(x)/2+1,:)-x(1)+1;
+                zQuery = zR(length(z)/2+1,:)-z(1)+1;
+                psfLine = interp2(obj.value,xQuery,zQuery);
+            end
             halfMaximum = max(obj.value(:))/2;
             start_guesses = 0;
             
@@ -141,7 +174,8 @@ classdef PointSpreadFunction < handle
             [~,sepPeaks] = model(estimates);
             out = estimates(1);
             
-            figure; plot(obj.xScale,sepPeaks); xlabel('mm'); title(sprintf('Image-Space Resolution by Peak-Seperation = %.4fmm',out)); drawnow;
+            
+            %figure; plot(obj.xScale,sepPeaks); xlabel('mm'); title(sprintf('Image-Space Resolution by Peak-Seperation = %.4fmm',out)); drawnow;
             
             function [sse,C] = fun(params)
                 shift = params(1);
@@ -162,6 +196,79 @@ classdef PointSpreadFunction < handle
                 
             end
         end
+        
+        
+        % @param varargin:
+            % @param string 'constrain', this forces the two profiles to be
+            % orthogonal
+        function [minLine,minLineFWHM,maxLine,maxLineFWHM,angleMin,angleMax] = maxMinProfiles(obj,varargin)
+            if nargin>1 && strcmp(varargin{1},'constrain')
+                orthoBool = 1;
+            else
+                orthoBool =0;
+            end
+            [r,c] = find(obj.value==max(obj.value(:)));
+            x = (1:size(obj.value,2))-nanmean(c); z = (1:size(obj.value,1))-nanmean(r);
+            [x2D,z2D] = meshgrid(x,z);
+            
+            
+            start_guesses = [0.05,0.05+pi/2];
+            model = @fun;
+            estimates = fminsearch(model,start_guesses);
+            
+            [~,line,line90] = model(estimates);
+            lineFWHM = PointSpreadFunction.resolutionFWHM(line,obj.xScale);
+            line90FWHM = PointSpreadFunction.resolutionFWHM(line90,obj.xScale);
+                
+            if lineFWHM>line90FWHM
+                minLine = line90; minLineFWHM = line90FWHM; angleMin = estimates(2);
+                maxLine = line; maxLineFWHM = lineFWHM; angleMax = estimates(1); 
+            else
+                minLine = line; minLineFWHM = lineFWHM; angleMin = estimates(1);
+                maxLine = line90; maxLineFWHM = line90FWHM; angleMax = estimates(2);
+            end
+            obj.maxProfile = maxLine; obj.minProfile = minLine;
+            obj.maxFWHM = maxLineFWHM; obj.minFWHM = minLineFWHM;
+            
+            function [sse,line,line90] = fun(params)
+                theta = params(1);
+                if orthoBool==0
+                    theta90 = params(2);
+                else
+                    theta90 = theta+pi/2;
+                end
+                
+                xThetaQuery = x.*cos(theta); zThetaQuery = z.*sin(theta);
+                xTheta90Query = x.*cos(theta90); zTheta90Query = z.*sin(theta90);
+                
+               % imagesc(x,z,obj.value); axis square; hold on; plot(xThetaQuery,zThetaQuery,'r'); plot(xTheta90Query,zTheta90Query,'g'); hold off; drawnow;
+                
+                line = interp2(x2D,z2D,obj.value,xThetaQuery,zThetaQuery);
+                line90 = interp2(x2D,z2D,obj.value,xTheta90Query,zTheta90Query);
+
+                sse = 1./sum((line-line90).^2);
+                
+            end
+        end
+        
+        % gets row and column profiles around average maximum
+        function rowColProfiles(obj)
+            [r,c] = find(obj.value==max(obj.value(:)));
+            
+            line = obj.value(:,nanmean(c)).'; line90 = obj.value(nanmean(r),:);
+            lineFWHM = PointSpreadFunction.resolutionFWHM(line,obj.xScale);
+            line90FWHM = PointSpreadFunction.resolutionFWHM(line90,obj.xScale);
+                
+            if lineFWHM>line90FWHM
+                minLine = line90; minLineFWHM = line90FWHM;
+                maxLine = line; maxLineFWHM = lineFWHM;
+            else
+                minLine = line; minLineFWHM = lineFWHM;
+                maxLine = line90; maxLineFWHM = line90FWHM;
+            end
+            obj.maxProfile = maxLine; obj.minProfile = minLine;
+            obj.maxFWHM = maxLineFWHM; obj.minFWHM = minLineFWHM;
+        end
     end
 
     methods (Static)
@@ -171,7 +278,7 @@ classdef PointSpreadFunction < handle
         % @param boolean varargin, display boolean, true==new figure
         % @return double FWHM, full-width half maximum spatial resolution in mm
         % @return double[][] gaussianFit
-        function [FWHM,gaussianFit] = fit2DGaussian(xydata,xScale,yScale,varargin)
+        function [averageFWHM,gaussianFit,eccentricity,minFWHM,maxFWHM,angle] = fit2DGaussian(xydata,xScale,yScale,varargin)
             % T.Watson based on fminsearch model
             [xdata,ydata] = meshgrid(xScale,yScale);
             [row,col] = find(xydata==max(xydata(:)));
@@ -199,7 +306,12 @@ classdef PointSpreadFunction < handle
             estimates = fminsearch(model,start_guesses,options);
             [~,gaussianFit] = model(estimates);
             
-            FWHM = (estimates(3)+estimates(4))/2*2*sqrt(2*log(2));
+            averageFWHM = (estimates(3)+estimates(4))/2*2*sqrt(2*log(2));
+            minFWHM = min(estimates(3),estimates(4))*2*sqrt(2*log(2));
+            maxFWHM = max(estimates(3),estimates(4))*2*sqrt(2*log(2));
+            
+            eccentricity = sqrt(1-(min(estimates(3),estimates(4))/max(estimates(3),estimates(4)))^2);
+            angle = estimates(2);
 
             function [sse,fit] = fun(params)
                 A = params(1);
@@ -216,15 +328,47 @@ classdef PointSpreadFunction < handle
 
                 fit = A.*exp(-(a.*(xdata-x0).^2+2*b.*(xdata-x0).*(ydata-y0)+c.*(ydata-y0).^2))+B;
                 if drawBoolean
-                    subplot(1,2,1)
+                    subplot(1,3,1)
                     imagesc(xScale,yScale,xydata); axis square;
-                    subplot(1,2,2)
+                    subplot(1,3,2)
                     imagesc(xScale,yScale,fit); axis square;
+                    subplot(1,3,3)
+                    imagesc(xScale,yScale,fit-xydata); axis square;
                     drawnow;
                 end      
                 sse = sum(sum((fit-xydata).^2));
             end
         end
+        
+        % function to calculate FWHM resolution by shifting copies of line
+        % @param double[] lineProfile, profile to find FWHM
+        % @param double[] scaleProfile, scale of profile in mm
+        function out = resolutionFWHM(lineProfile,scaleProfile)
+            halfMaximum = max(lineProfile)/2;
+            model = @fun;
+            start_guesses = 0;
+            options = optimset('MaxFunEvals',2000*length(start_guesses),'MaxIter',2000*length(start_guesses));
+            estimates = fminsearch(model,start_guesses,options);
+            out = estimates(1);
+            
+            function [sse,C] = fun(params)
+                shift = params(1);
+                
+                A = interp1(scaleProfile,lineProfile,scaleProfile+shift/2);
+                B = interp1(scaleProfile,lineProfile,scaleProfile-shift/2);
+                
+                % This method provides true resolution if defined by
+                % peak-dip = 0.5 peak height
+                C = A+B;
+                % This method provides the conventional answer (i.e 1/abbe)
+                C = max(A,B);
+                
+                sse = sum((C(length(lineProfile)/2+1)-halfMaximum).^2);
+                
+                %plot(obj.xScale,C); drawnow;
+            end
+        end
+        
     end
     
 end

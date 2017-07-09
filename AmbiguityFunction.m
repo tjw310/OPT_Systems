@@ -46,8 +46,7 @@ classdef AmbiguityFunction < handle
                 focalRange = optSys.getFocalScanRange;
                 rho = focalRange/objective.getF^2;
                 wMax = objective.getNA*objective.getF;
-                %t_scale = t_scale./focalRange*optSys.DoFinMM;
-                
+                t_scale = t_scale./focalRange*optSys.DoFinMM;
             else
                 wMax = objective.getEffNA(optSys.getApertureRadius)*objective.getF;
             end
@@ -139,6 +138,8 @@ classdef AmbiguityFunction < handle
         % @param boolean varargin{1}, display boolean
         % @return double[] rDTF, radial defocussed transfer function
         % @return double[][] DTF, 2D defocussed transfer function
+        % @return double[][] optDTF, 2D defocussed transfer function with
+        % addition of ramp filter
         function [DTF,rDTF] = getDTF(obj,optSys,objective,point,theta,zOffset,varargin)
             x = point.getX; z = point.getZ; 
             
@@ -155,9 +156,9 @@ classdef AmbiguityFunction < handle
             end
 
             rDTF = interp2(tau2D,mu2D,obj.value,obj.tau,muQuery);
-
+            
             [x1,z1] = meshgrid(-size(obj.value,2)/2:size(obj.value,2)/2-1);
-            DTF = interp2(x1,z1,repmat(rDTF,size(obj.value,2),1),sqrt((x1+0.5).^2+(z1+0.5).^2),(z1+0.5));
+            DTF = interp2(x1,z1,repmat(rDTF,size(obj.value,2),1),sqrt(x1.^2+z1.^2),z1);
             DTF(isnan(DTF))=0;
             
             if nargin==7 && varargin{1}
@@ -241,6 +242,81 @@ classdef AmbiguityFunction < handle
                 psfObject.show; title('Image-Space PSF');
             end
 
+        end
+        
+        
+        % function to get reconstructed PSF in xz
+        % @param OPTSystem optSys
+        % @param Objective objective
+        % @param PointObject point
+        % @param int numberBesselZeros, limit of PSF scale at this
+        % number of bessel zeros
+        % @param double zOffset offset of focal plane from (x,z)
+        % coordinate origin in mm
+        % @param varargin:
+            % @param string '3d', to output array of 3D recon PSF 
+        function [reconPSF,P] = getReconPSF(obj,optSys,objective,point,numberBesselZeros,zOffset,varargin)
+            if optSys.getScanBoolean==0
+                NA = objective.getEffNA(optSys.getApertureRadius);
+            else
+                NA = objective.getNA;
+            end
+            
+            if nargin>6 && strcmp(varargin{1},'3d')
+                bool3D = 1;
+                m=64;
+                P = zeros(m,m,m);
+            else
+                bool3D = 0;
+                m=128;
+                P = zeros(m,m);
+            end
+            
+            du = 4*NA/optSys.getLambda/(size(obj.value,2)-1);  
+            bessel_zeros = AmbiguityFunction.besselzero(1,numberBesselZeros,1);
+            x_ft_max = bessel_zeros(numberBesselZeros)/pi*optSys.getLambda/NA/2; %chirp z max frequency
+            
+            [x,z] = meshgrid(-m/2:m/2-1);
+                        
+            counter=1;
+            for t=optSys.theta
+                DTF = obj.getDTF(optSys,objective,point,t,zOffset,false);
+                optDTF = DTF.*repmat(abs(linspace(-1,1,size(DTF,2))),size(DTF,1),1)*2/size(DTF,2);
+                psf = AmbiguityFunction.iczt_TW(optDTF,du,x_ft_max,m);
+                scalePSF = (-1:2/m:1-2/m).*x_ft_max;
+                switch bool3D
+                    case 0
+                        rPSF = psf(m/2+1,:);
+
+                        projCont = real(interp2(repmat(rPSF,m,1),(x.*cos(t)-z.*sin(t))-x(1,1)+1,(z.*cos(t)+x.*sin(t))-z(1,1)+1));
+                        projCont(isnan(projCont))= 0;                
+                        P = P + projCont;
+                    case 1
+                        for j=1:m
+                            linePSF = psf(j,:);
+                            projCont = real(interp2(repmat(linePSF,m,1),(x.*cos(t)-z.*sin(t))-x(1,1)+1,(z.*cos(t)+x.*sin(t))-z(1,1)+1));
+                            projCont(isnan(projCont))= 0;
+                            P(:,:,j) = P(:,:,j)+projCont;
+                        end
+                end
+                
+%                 if rem(counter,round(length(optSys.theta)/10))==0
+%                     disp(counter/length(optSys.theta)*100);
+%                 end
+                counter=counter+1;
+            end
+            if bool3D==1
+                reconPSF = PointSpreadFunction(P(:,:,m/2+1),scalePSF,scalePSF);
+                contourScale = linspace(min(P(:)),max(P(:)),25);
+                nearZero = (max(P(:))-min(P(:)))*0.01;
+                %contourScale = contourScale(~and(contourScale>-nearZero,contourScale<nearZero));
+                [x,y,z] = meshgrid(reconPSF.getXScale./optSys.resolution);
+                figure; contourslice(x,y,z,P,0,[],0,contourScale); axis equal; drawnow; xlabel('Tangential (per 0.5\lambda/NA)'); ylabel('Radial (per 0.5\lambda/NA)'); zlabel('Height (per 0.5\lambda/NA)');
+            else
+                reconPSF = PointSpreadFunction(P,scalePSF,scalePSF);
+            end
+            %reconPSF.maxMinProfiles('constrain');
+            reconPSF.rowColProfiles();
         end
             
     end

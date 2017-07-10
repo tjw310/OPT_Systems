@@ -12,6 +12,8 @@ classdef PointSpreadFunction < handle
         
         maxProfile %profile through PSF that maximises resoltuion
         minProfile %profile through PSF that minimises resolution
+        maxFWHM % max FWHM through anisotropic PSF
+        minFWHM %min FWHM through anisotropic PSF
     end
     
     methods %constructor and get/set
@@ -85,12 +87,19 @@ classdef PointSpreadFunction < handle
         function out = colProfile(obj,colIndex)
             out = obj.value(:,colIndex);
         end
-        
-        %
+
         function out = getMinProfile(obj)
             out = obj.minProfile;
         end
-        function out = getMaxProfile
+        function out = getMaxProfile(obj)
+            out = obj.maxProfile;
+        end
+        function out = getMaxFWHM(obj)
+            out = obj.maxFWHM;
+        end
+        function out = getMinFWHM(obj)
+            out = obj.minFWHM;
+        end
         
     end
     
@@ -159,9 +168,6 @@ classdef PointSpreadFunction < handle
             halfMaximum = max(obj.value(:))/2;
             start_guesses = 0;
             
-            max(obj.value(:))
-            max(psfLine(:))
-            
             model = @fun;
             options = optimset('MaxFunEvals',2000*length(start_guesses),'MaxIter',2000*length(start_guesses));
             estimates = fminsearch(model,start_guesses,options); 
@@ -201,17 +207,23 @@ classdef PointSpreadFunction < handle
             else
                 orthoBool =0;
             end
+            
+            halfMax = max(obj.value(:))/2;
+            C = contourc(obj.value,[halfMax,halfMax]);
+            
             [r,c] = find(obj.value==max(obj.value(:)));
-            x = (1:size(obj.value,2))-c; z = (1:size(obj.value,1))-r;
+            x = (1:size(obj.value,2))-nanmean(c); z = (1:size(obj.value,1))-nanmean(r);
             [x2D,z2D] = meshgrid(x,z);
             
             
-            start_guesses = [0.1,0.1+pi/2];
+            start_guesses = [0.05,0.05+pi/2];
             model = @fun;
-            options = optimset('MaxFunEvals',2000*length(start_guesses),'MaxIter',2000*length(start_guesses));
-            estimates = fminsearch(model,start_guesses,options);
+            estimates = fminsearch(model,start_guesses);
             
-            [~,line,line90,lineFWHM,line90FWHM] = model(estimates);
+            [~,line,line90] = model(estimates);
+            lineFWHM = PointSpreadFunction.resolutionFWHM(line,obj.xScale);
+            line90FWHM = PointSpreadFunction.resolutionFWHM(line90,obj.xScale);
+                
             if lineFWHM>line90FWHM
                 minLine = line90; minLineFWHM = line90FWHM; angleMin = estimates(2);
                 maxLine = line; maxLineFWHM = lineFWHM; angleMax = estimates(1); 
@@ -220,8 +232,9 @@ classdef PointSpreadFunction < handle
                 maxLine = line90; maxLineFWHM = line90FWHM; angleMax = estimates(2);
             end
             obj.maxProfile = maxLine; obj.minProfile = minLine;
+            obj.maxFWHM = maxLineFWHM; obj.minFWHM = minLineFWHM;
             
-            function [sse,line,line90,lineFWHM,line90FWHM] = fun(params)
+            function [sse,line,line90] = fun(params)
                 theta = params(1);
                 if orthoBool==0
                     theta90 = params(2);
@@ -232,17 +245,77 @@ classdef PointSpreadFunction < handle
                 xThetaQuery = x.*cos(theta); zThetaQuery = z.*sin(theta);
                 xTheta90Query = x.*cos(theta90); zTheta90Query = z.*sin(theta90);
                 
-                %imagesc(obj.xScale,obj.yScale,obj.value); axis square; hold on; plot(xThetaQuery,zThetaQuery,'r'); plot(xTheta90Query,zTheta90Query,'g'); hold off; drawnow;
+               % imagesc(x,z,obj.value); axis square; hold on; plot(xThetaQuery,zThetaQuery,'r'); plot(xTheta90Query,zTheta90Query,'g'); hold off; drawnow;
                 
                 line = interp2(x2D,z2D,obj.value,xThetaQuery,zThetaQuery);
                 line90 = interp2(x2D,z2D,obj.value,xTheta90Query,zTheta90Query);
+
+               % sse = 1./sum((line-line90).^2);
                 
-                lineFWHM = PointSpreadFunction.resolutionFWHM(line,obj.xScale);
-                line90FWHM = PointSpreadFunction.resolutionFWHM(line90,obj.xScale);
-                
-                sse = 1./sum((line-line90).^2);
+                sse = 1./nansum((nanstd(line)-nanstd(line90)).^2);
                 
             end
+        end
+        
+        % gets row and column profiles around average maximum
+        function rowColProfiles(obj)
+            [r,c] = find(obj.value==max(obj.value(:)));
+            
+            line = obj.value(:,nanmean(c)).'; line90 = obj.value(nanmean(r),:);
+            lineFWHM = PointSpreadFunction.resolutionFWHM(line,obj.xScale);
+            line90FWHM = PointSpreadFunction.resolutionFWHM(line90,obj.xScale);
+                
+            if lineFWHM>line90FWHM
+                minLine = line90; minLineFWHM = line90FWHM;
+                maxLine = line; maxLineFWHM = lineFWHM;
+            else
+                minLine = line; minLineFWHM = lineFWHM;
+                maxLine = line90; maxLineFWHM = line90FWHM;
+            end
+            obj.maxProfile = maxLine; obj.minProfile = minLine;
+            obj.maxFWHM = maxLineFWHM; obj.minFWHM = minLineFWHM;
+        end
+        
+        % finds resolution using a contour method
+        function contourFWHM(obj)
+            interpFactor = 0.25;
+            interpValues = (1:interpFactor:size(obj.value,1));
+            overSampleScale = interp1(obj.xScale,interpValues);
+            [xSample,ySample] = meshgrid(interpValues);
+            overSampledPSF = interp2(obj.value,xSample,ySample);
+            
+            halfMax = (nanmax(obj.value(:))-nanmedian(obj.value(:)))/2+nanmedian(obj.value(:)); % defined as value at half height between maximum and median value (for noise purposes)
+            C = contourc(overSampleScale,overSampleScale,overSampledPSF,[halfMax,halfMax]);
+            
+            r = sqrt(C(1,2:end).^2+C(2,2:end).^2);
+            theta = atan2(C(1,2:end),C(2,2:end));
+            
+            thetaPi = theta(theta>0); rPi = r(theta>0);
+            thetaQuery = thetaPi-pi;
+            
+            for i=1:length(thetaPi)
+                df = abs(theta-thetaQuery(i));
+                [~,lc] = min(df);
+                FWHM(i) = r(lc)+rPi(i); angle(i) = thetaPi(i);
+            end
+            
+            [maxFWHM,mxLc] = max(FWHM); [minFWHM,mnLc] = min(FWHM);
+            angleMax = angle(mxLc); angleMin = angle(mnLc);
+            
+            [x2D,y2D] = meshgrid(obj.xScale);
+            xThetaQueryMax = obj.xScale.*cos(angleMax); zThetaQueryMax = obj.xScale.*sin(angleMax);
+            xThetaQueryMin = obj.xScale.*cos(angleMin); zThetaQueryMin = obj.xScale.*sin(angleMin);
+            
+            minLine = interp2(x2D,y2D,obj.value,xThetaQueryMin,zThetaQueryMin);
+            maxLine = interp2(x2D,y2D,obj.value,xThetaQueryMax,zThetaQueryMax);
+
+            obj.maxProfile = maxLine; obj.minProfile = minLine;
+            obj.maxFWHM = maxFWHM; obj.minFWHM = minFWHM;
+            
+            figure; subplot(1,2,1); contour(overSampleScale,overSampleScale,overSampledPSF,[halfMax,halfMax]); axis square;
+            subplot(1,2,2); plot(obj.xScale,obj.minProfile); hold on; plot(obj.xScale,obj.maxProfile); hold off; xlabel ('mm'); ylabel('Relative Intensity'); axis square; 
+            legend(sprintf('FWHM = %0.2fµm',minFWHM*10^3),sprintf('FWHM = %0.2fµm',maxFWHM*10^3));
+            drawnow;
         end
     end
 

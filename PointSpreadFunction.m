@@ -207,6 +207,10 @@ classdef PointSpreadFunction < handle
             else
                 orthoBool =0;
             end
+            
+            halfMax = max(obj.value(:))/2;
+            C = contourc(obj.value,[halfMax,halfMax]);
+            
             [r,c] = find(obj.value==max(obj.value(:)));
             x = (1:size(obj.value,2))-nanmean(c); z = (1:size(obj.value,1))-nanmean(r);
             [x2D,z2D] = meshgrid(x,z);
@@ -270,6 +274,48 @@ classdef PointSpreadFunction < handle
             end
             obj.maxProfile = maxLine; obj.minProfile = minLine;
             obj.maxFWHM = maxLineFWHM; obj.minFWHM = minLineFWHM;
+        end
+        
+        % finds resolution using a contour method
+        function contourFWHM(obj)
+            interpFactor = 1;
+            interpValues = (1:interpFactor:size(obj.value,1));
+            overSampleScale = interp1(obj.xScale,interpValues);
+            [xSample,ySample] = meshgrid(interpValues);
+            overSampledPSF = interp2(obj.value,xSample,ySample);
+            
+            halfMax = (nanmax(obj.value(:))-nanmedian(obj.value(:)))/2+nanmedian(obj.value(:)); % defined as value at half height between maximum and median value (for noise purposes)
+            C = contourc(overSampleScale,overSampleScale,overSampledPSF,[halfMax,halfMax]);
+            
+            r = sqrt(C(1,2:end).^2+C(2,2:end).^2);
+            theta = atan2(C(1,2:end),C(2,2:end));
+            
+            thetaPi = theta(theta>0); rPi = r(theta>0);
+            thetaQuery = thetaPi-pi;
+            
+            for i=1:length(thetaPi)
+                df = abs(theta-thetaQuery(i));
+                [~,lc] = min(df);
+                FWHM(i) = r(lc)+rPi(i); angle(i) = thetaPi(i);
+            end
+            
+            [maxFWHM,mxLc] = max(FWHM); [minFWHM,mnLc] = min(FWHM);
+            angleMax = angle(mxLc); angleMin = angle(mnLc);
+            
+            [x2D,y2D] = meshgrid(obj.xScale);
+            xThetaQueryMax = obj.xScale.*cos(angleMax); zThetaQueryMax = obj.xScale.*sin(angleMax);
+            xThetaQueryMin = obj.xScale.*cos(angleMin); zThetaQueryMin = obj.xScale.*sin(angleMin);
+            
+            minLine = interp2(x2D,y2D,obj.value,xThetaQueryMin,zThetaQueryMin);
+            maxLine = interp2(x2D,y2D,obj.value,xThetaQueryMax,zThetaQueryMax);
+
+            obj.maxProfile = maxLine; obj.minProfile = minLine;
+            obj.maxFWHM = maxFWHM; obj.minFWHM = minFWHM;
+            
+            figure; subplot(1,2,1); contour(overSampleScale,overSampleScale,overSampledPSF,[halfMax,halfMax]); axis square;
+            subplot(1,2,2); plot(obj.xScale,obj.minProfile); hold on; plot(obj.xScale,obj.maxProfile); hold off; xlabel ('mm'); ylabel('Relative Intensity'); axis square; 
+            legend(sprintf('FWHM = %0.2fµm',minFWHM*10^3),sprintf('FWHM = %0.2fµm',maxFWHM*10^3));
+            drawnow;
         end
     end
 
